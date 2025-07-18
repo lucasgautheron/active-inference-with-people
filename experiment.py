@@ -379,9 +379,6 @@ class KnowledgeTrial(StaticTrial):
         return page
 
     def show_feedback(self, experiment, participant):
-        if self.answer == "unknown":
-            return None
-
         return InfoPage(
             Markup("Congratulations, this is correct!")
             if self.var.correct == True
