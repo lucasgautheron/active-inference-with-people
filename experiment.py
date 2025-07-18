@@ -432,6 +432,7 @@ trial_maker = KnowledgeTrialMaker(
     id_="knowledge",
     trial_class=KnowledgeTrial,
     expected_trials_per_participant=15,
+    max_trials_per_participant=15,
     allow_repeated_nodes=False,
     balance_across_nodes=True,
     target_n_participants=1,
