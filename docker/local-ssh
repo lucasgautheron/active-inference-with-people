@@ -1,0 +1,13 @@
+#!/bin/bash
+
+# Given a local experiment spawned with `docker/psynet debug`,
+# spawn a bash terminal inside the running container, as if by SSH.
+
+set -euo pipefail
+
+. docker/params
+
+docker exec \
+  -it \
+  dallinger \
+  /bin/bash

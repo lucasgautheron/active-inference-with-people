@@ -1,0 +1,31 @@
+#!/bin/bash
+
+# Initialize parameters for running PsyNet in Docker.
+
+if test -f Dockertag; then
+  export EXPERIMENT_IMAGE=$(cat Dockertag)
+else
+  export EXPERIMENT_IMAGE=psynet-experiment
+fi
+
+if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+  export PLATFORM="linux"
+elif [[ "$OSTYPE" == "darwin"* ]]; then
+  export PLATFORM="macos"
+elif [[ "$OSTYPE" == "cygwin" ]]; then
+  export PLATFORM="windows"
+elif [[ "$OSTYPE" == "msys" ]]; then
+  export PLATFORM="windows"
+else
+  echo "Unsupported operating system: ${OSTYPE}"
+  exit 1
+fi
+
+export REMOTE_DEBUGGER_PORT=12345
+export DOCKER_BUILDKIT=1
+export PSYNET_LOCAL_PATH="${HOME}"/PsyNet
+export PSYNET_LOCAL_DATA_PATH="${HOME}"/psynet-data
+export DALLINGER_LOCAL_PATH="${HOME}"/Dallinger
+export PSYNET_DEBUG_STORAGE="${HOME}"/psynet-debug-storage
+export PSYNET_EXPORT_STORAGE="${HOME}"/psynet-data/export
+export SSH_VOLUME=~/.ssh:/root/.ssh

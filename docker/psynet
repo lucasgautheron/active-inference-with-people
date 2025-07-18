@@ -1,0 +1,17 @@
+#!/bin/bash
+
+# Invoke PsyNet. Arguments can be passed to the Psynet invocation as normal, for example `psynet debug`.
+
+set -euo pipefail
+
+. docker/params
+
+./docker/run psynet "$@"
+
+# Have disabled this command filtering because it broke progress bars etc.
+# Instead directory names should be mapped as described here: https://gitlab.com/PsyNetDev/PsyNet/-/issues/544
+#
+#| sed \
+#-e "s:/tmp/dallinger_develop/:${PWD}/:" \
+#-e "s:\"/PsyNet/":"\"${PSYNET_LOCAL_PATH}/:" \
+#-e "s:/psynet-data/:${PSYNET_LOCAL_DATA_PATH}/:"

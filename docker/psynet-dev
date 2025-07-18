@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# Invoke PsyNet in developer mode, meaning that the Docker image will use local installations of PsyNet and Dallinger,
+# assumed to be located at ~/PsyNet and ~/Dallinger respectively.
+# Arguments can be passed to the PsyNet invocation as normal, for example `psynet-dev debug`.
+# Note: console logs will be filtered to map mapped Docker directories to their local equivalents.
+
+export PSYNET_DEVELOPER_MODE=1
+
+./docker/psynet "$@"

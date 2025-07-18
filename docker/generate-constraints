@@ -1,0 +1,10 @@
+#!/bin/bash
+
+set -euo pipefail
+
+docker run \
+  --rm \
+  -v "${PWD}":/experiment \
+  -e SKIP_DEPENDENCY_CHECK="" \
+  registry.gitlab.com/psynetdev/psynet:master \
+  bash -c "cd /experiment && psynet generate-constraints"

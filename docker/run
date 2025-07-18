@@ -1,0 +1,60 @@
+#!/bin/bash
+
+set -euo pipefail
+
+touch "${HOME}/.dallingerconfig"
+
+. docker/params
+
+if [[ ${PSYNET_DEVELOPER_MODE:-} == "1" ]]; then
+  . docker/check-dev-installations
+fi
+
+. docker/services
+. docker/build
+
+( docker stop dallinger > /dev/null && echo Stopped existing dallinger container && \
+  docker rm dallinger ) 2>/dev/null || true
+
+if [[ ${PSYNET_DEVELOPER_MODE:-} == "1" ]]; then
+  echo "Ensuring that local installations are ready to use in Docker..."
+
+  docker run \
+   --rm \
+   -v "${PSYNET_LOCAL_PATH}":/PsyNet \
+   -v "${DALLINGER_LOCAL_PATH}":/dallinger \
+   "${EXPERIMENT_IMAGE}" \
+   /bin/bash -c "if [ ! -d '/dallinger/dallinger.egg-info' ]; then pip install -e '/dallinger[dev]'; fi && if [ ! -d '/PsyNet/psynet.egg-info' ]; then pip install -e '/PsyNet[dev]'; fi"
+
+   echo "...local installations seem ready."
+fi
+
+
+docker run \
+  --name dallinger \
+  --rm \
+  -ti \
+  -v /etc/group:/etc/group \
+  -v ~/.docker:/root/.docker \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "${SSH_VOLUME}" \
+  -v "${HOME}/Library/Application Support/dallinger/":/root/.local/share/dallinger/ \
+  -v "${PWD}":/experiment \
+  -v "${HOME}"/.dallingerconfig:/root/.dallingerconfig \
+  -v "${HOME}"/.netrc:/root/.netrc \
+  -v "${HOME}"/.gitconfig:/root/.gitconfig \
+  -v "$PSYNET_EXPORT_STORAGE":/psynet-data/export \
+  -v ~/.ssh:/root/.ssh \
+  --network dallinger \
+  -p 5000:5000 \
+  -e SKIP_DEPENDENCY_CHECK="" \
+  -e DALLINGER_NO_EGG_BUILD=1 \
+  -e FLASK_OPTIONS='-h 0.0.0.0' \
+  -e REDIS_URL=redis://dallinger_redis:6379 \
+  -e DATABASE_URL=postgresql://dallinger:dallinger@dallinger_postgres/dallinger \
+  -e PSYNET_DEVELOPER_MODE="${PSYNET_DEVELOPER_MODE:-}" \
+  -v "${PSYNET_LOCAL_PATH}":/PsyNet \
+  -v "${DALLINGER_LOCAL_PATH}":/dallinger \
+  --add-host=host.docker.internal:host-gateway \
+  "${EXPERIMENT_IMAGE}" \
+  "$@"
