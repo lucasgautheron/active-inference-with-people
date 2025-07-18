@@ -255,8 +255,6 @@ class AdaptiveLearner:
                 final_num_samples=1000,
             )
 
-            print(eig)
-
             # Find best item for this participant
             mask = torch.ones_like(eig, dtype=torch.bool)
             if exclude:
@@ -274,7 +272,7 @@ class AdaptiveLearner:
             return best_item.item(), best_eig.item(), eig
 
         except Exception as e:
-            print(f"Error computing EIG for participant {participant_id}: {e}")
+            logger.error(f"Error computing EIG for participant {participant_id}: {e}")
             return None, None, None
 
     def get_optimal_test_for_participant(self, participant_id, exclude: list = []):
@@ -449,8 +447,6 @@ trial_maker = KnowledgeTrialMaker(
     expected_trials_per_participant=15,
     allow_repeated_nodes=False,
     balance_across_nodes=True,
-    # check_performance_at_end=True,
-    # check_performance_every_trial=True,
     target_n_participants=1,
     target_trials_per_node=None,
     recruit_mode="n_participants",
