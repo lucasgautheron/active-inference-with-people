@@ -1,7 +1,6 @@
 # pylint: disable=unused-import,abstract-method
 
 import logging
-import random
 
 from markupsafe import Markup
 
@@ -23,15 +22,6 @@ import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
-
-nodes = [
-    StaticNode(
-        definition={"animal": animal},
-        block=block,
-    )
-    for animal in ["cats", "dogs", "fish", "ponies"]
-    for block in ["A", "B", "C"]
-]
 
 
 class AdaptiveLearner:
