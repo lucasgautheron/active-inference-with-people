@@ -35,7 +35,7 @@ class AdaptiveLearner:
         self.prior_mean_theta = torch.tensor(0.0)
         self.prior_sd_theta = torch.tensor(1.0)
         self.prior_mean_difficulty = torch.tensor(0.0)
-        self.prior_sd_difficulty = torch.tensor(0.5)
+        self.prior_sd_difficulty = torch.tensor(1.0)
 
         # Prior parameters for intercept term
         self.prior_mean_intercept = torch.tensor(0.0)
@@ -423,7 +423,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         pid = self.learner.get_participant(participant)
         self.learner.administer_response(pid, trial.node.definition["id"], trial.var.correct)
         self.learner.update_posterior()
-        print(self.learner.current_theta_means[pid], self.learner.current_difficulty_means[trial.node.definition["id"]])
+
+        mu = self.learner.current_theta_means[pid]
+        sd = self.learner.current_theta_sds[pid]
+        logger.info(f"Posterior participant ability: N({mu:.2f}, {sd:.2f})")
+
+        mu = self.learner.current_difficulty_means[trial.node.definition["id"]]
+        sd = self.learner.current_difficulty_sds[trial.node.definition["id"]]
+        logger.info(f"Posterior item difficulty: N({mu:.2f}, {sd:.2f})")
 
         super().finalize_trial(answer, trial, experiment, participant)
 
