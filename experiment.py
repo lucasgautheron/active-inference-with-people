@@ -412,7 +412,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         next_node_id = self.learner.get_optimal_test_for_participant(pid)
 
         for candidate in candidates:
-            if any([node.id == next_node_id for node in candidate.nodes()]):
+            if any([node.definition["id"] == next_node_id for node in candidate.nodes()]):
                 return [candidate]
 
         return candidates
