@@ -455,7 +455,7 @@ trial_maker = KnowledgeTrialMaker(
 
 
 class Exp(psynet.experiment.Experiment):
-    label = "Static experiment demo"
+    label = "Adaptive Bayesian testing demo"
     initial_recruitment_size = 1
     test_n_bots = 2
 
