@@ -15,19 +15,45 @@ import pyro
 import pyro.distributions as dist
 import numpy as np
 from torch.distributions.constraints import positive
-from pyro.contrib.oed.eig import marginal_eig
+from pyro.contrib.oed.eig import marginal_eig, posterior_eig, vnmc_eig
 from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
+
+from matplotlib import pyplot as plt
+from scipy.stats import norm
+
 import pandas as pd
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
+class Oracle:
+    def __init__(self):
+        answers = pd.read_csv("static/answers.csv")
+        answers = np.stack(answers.values)[:, :15]
+        answers = answers[~np.any(pd.isna(answers), axis=1)]
+
+        self.answers = [
+            {
+                "answers": answers[i]
+            }
+            for i in range(len(answers))
+        ]
+
+    def answer(self, participant_id: int, item: int):
+        return self.answers[participant_id]["answers"][item]
+
+
+oracle = Oracle()
+
+
 class AdaptiveLearner:
     """Adaptive test design system using Bayesian optimization"""
 
     def __init__(self, num_items, max_participants=1000):
+        logger.debug("Initializing adaptive learner.")
+
         self.max_participants = max_participants
         self.num_items = num_items
 
@@ -64,7 +90,7 @@ class AdaptiveLearner:
         self.current_intercept_sd = torch.tensor(self.prior_sd_intercept)
 
         # EIG computation parameters
-        self.num_steps = 500
+        self.num_steps = 2000
         self.start_lr = 0.1
         self.end_lr = 0.001
 
@@ -73,7 +99,7 @@ class AdaptiveLearner:
         new_participant_id = len(self.current_participants)
         self.participants[new_participant_id] = participant.id
         self.current_participants.append(new_participant_id)
-        logger.info(f"AdaptiveLearner added new participant: {new_participant_id}")
+        logger.debug(f"AdaptiveLearner added new participant: {new_participant_id}")
 
         return new_participant_id
 
@@ -228,42 +254,51 @@ class AdaptiveLearner:
             }
         )
 
-        try:
-            eig = marginal_eig(
-                design_model,
-                candidate_designs,
-                "y",
-                [
-                    "theta",
-                    "difficulties",
-                    "intercept",
-                ],  # Added intercept to target labels
-                num_samples=300,
-                num_steps=self.num_steps,
-                guide=self._marginal_guide,
-                optim=optimizer,
-                final_num_samples=1000,
-            )
+        eig = marginal_eig(
+            design_model,
+            candidate_designs,
+            "y",
+            [
+                "theta",
+                "difficulties",
+                "intercept",
+            ],  # Added intercept to target labels
+            num_samples=100,
+            num_steps=self.num_steps,
+            guide=self._marginal_guide,
+            optim=optimizer,
+            final_num_samples=10000,
+        )
 
-            # Find best item for this participant
-            mask = torch.ones_like(eig, dtype=torch.bool)
-            if exclude:
-                exclude_tensor = torch.tensor(exclude, device=eig.device)
-                mask[exclude_tensor] = False
+        x = np.linspace(-3, +3, 200)
+        y = norm.pdf(x, loc=self.current_theta_means[participant_id], scale=self.current_theta_sds[participant_id])
+        plt.plot(x, y, label="Participant ability")
 
-            # Set excluded items to negative infinity so they won't be selected
-            masked_eig = eig.clone()
-            masked_eig[~mask] = float("-inf")
+        cmap = plt.get_cmap("tab10")
+        for i in range(self.num_items):
+            color = cmap(i)
+            y = norm.pdf(x, loc=self.current_difficulty_means[i], scale=self.current_difficulty_sds[i])
+            plt.plot(x, y, label="Participant ability", alpha=0.2, color=color)
+            plt.scatter([self.current_difficulty_means[i]], [eig.detach()[i]], color=color)
 
-            # Find the best item from the remaining candidates
-            best_item = torch.argmax(masked_eig).long()
-            best_eig = eig[best_item]
+        plt.savefig("test_{}.png".format(participant_id))
+        plt.clf()
 
-            return best_item.item(), best_eig.item(), eig
+        # Find best item for this participant
+        mask = torch.ones_like(eig, dtype=torch.bool)
+        if exclude:
+            exclude_tensor = torch.tensor(exclude, device=eig.device)
+            mask[exclude_tensor] = False
 
-        except Exception as e:
-            logger.error(f"Error computing EIG for participant {participant_id}: {e}")
-            return None, None, None
+        # Set excluded items to negative infinity so they won't be selected
+        masked_eig = eig.clone()
+        masked_eig[~mask] = float("-inf")
+
+        # Find the best item from the remaining candidates
+        best_item = torch.argmax(masked_eig).long()
+        best_eig = eig[best_item]
+
+        return best_item.item(), best_eig.item(), eig
 
     def get_optimal_test_for_participant(self, participant_id, exclude: list = []):
         """Get the optimal test item for a given participant"""
@@ -290,13 +325,13 @@ class AdaptiveLearner:
         if len(self.responses) == 0:
             return
 
-        print("Updating posterior...")
+        logger.debug("Updating posterior...")
         pyro.clear_param_store()
         conditioned_model = pyro.condition(self._model, {"y": self.responses})
         svi = SVI(
             conditioned_model,
             self._guide,
-            Adam({"lr": 0.01}),
+            Adam({"lr": 0.02}),
             loss=Trace_ELBO(),
         )
 
@@ -343,7 +378,7 @@ class AdaptiveLearner:
 
 
 class KnowledgeTrial(StaticTrial):
-    time_estimate = 3
+    time_estimate = 10
 
     def __init__(self, experiment, node, participant, *args, **kwargs):
         super().__init__(experiment, node, participant, *args, **kwargs)
@@ -358,10 +393,12 @@ class KnowledgeTrial(StaticTrial):
             Markup(
                 f"""
                 <p id='question'>{question}</p>
+                (Leave empty if you do not know)
                 """
             ),
             TextControl(
-                block_copy_paste=True
+                block_copy_paste=True,
+                bot_response=lambda: oracle.answer(participant.id, self.definition["item_id"])
             ),
             time_estimate=self.time_estimate,
         )
@@ -378,12 +415,12 @@ class KnowledgeTrial(StaticTrial):
 
 class KnowledgeTrialMaker(StaticTrialMaker):
     def __init__(self, *args, setup: str = "adaptive", **kwargs):
-        questions = pd.read_csv("static/questions.csv")
+        questions = pd.read_csv("static/questions.csv").head(15)
 
         nodes = [
             StaticNode(
                 definition={
-                    "id": i,
+                    "item_id": i,
                     "question": question["question"],
                     "answers": question["answers"].split("|")
                 }
@@ -392,27 +429,36 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         ]
 
         super().__init__(*args, **kwargs, nodes=nodes)
-        self.setup = setup
 
+        self.setup = setup
+        logger.info("Initializing adaptive learner?")
         self.learner = AdaptiveLearner(len(nodes))
 
     def custom_network_filter(self, candidates, participant):
         if self.setup == "static":
             return candidates
 
-        nodes = []
-        for candidate in candidates:
-            nodes += candidate.nodes()
-
+        logger.info("Getting data for participant")
         if participant.id not in self.learner.participants.values():
+            logger.info("New participant")
             pid = self.learner.add_participant(participant)
+            logger.info(self.learner.participants)
         else:
             pid = self.learner.get_participant(participant)
 
-        next_node_id = self.learner.get_optimal_test_for_participant(pid)
-
+        candidate_items = []
         for candidate in candidates:
-            if any([node.definition["id"] == next_node_id for node in candidate.nodes()]):
+            candidate_items += [node.definition["item_id"] for node in candidate.nodes()]
+
+        # exclude items that are not among the candidate items
+        exclude = [item for item in range(self.learner.num_items) if item not in candidate_items]
+
+        # choose best item
+        next_node_id = self.learner.get_optimal_test_for_participant(pid, exclude=exclude)
+
+        # recover the retained candidate
+        for candidate in candidates:
+            if any([node.definition["item_id"] == next_node_id for node in candidate.nodes()]):
                 return [candidate]
 
         return candidates
@@ -420,17 +466,26 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     def finalize_trial(self, answer, trial, experiment, participant):
         trial.var.correct = trial.answer.lower() in trial.node.definition["answers"]
 
-        pid = self.learner.get_participant(participant)
-        self.learner.administer_response(pid, trial.node.definition["id"], trial.var.correct)
+        logger.info("Finalizing trial, looking for participant")
+        if participant.id not in self.learner.participants.values():
+            logger.info("New participant")
+            pid = self.learner.add_participant(participant)
+            logger.info(self.learner.participants)
+        else:
+            pid = self.learner.get_participant(participant)
+
+        self.learner.administer_response(pid, trial.node.definition["item_id"], trial.var.correct)
         self.learner.update_posterior()
 
         mu = self.learner.current_theta_means[pid]
         sd = self.learner.current_theta_sds[pid]
         logger.info(f"Posterior participant ability: N({mu:.2f}, {sd:.2f})")
 
-        mu = self.learner.current_difficulty_means[trial.node.definition["id"]]
-        sd = self.learner.current_difficulty_sds[trial.node.definition["id"]]
+        mu = self.learner.current_difficulty_means[trial.node.definition["item_id"]]
+        sd = self.learner.current_difficulty_sds[trial.node.definition["item_id"]]
         logger.info(f"Posterior item difficulty: N({mu:.2f}, {sd:.2f})")
+        logger.info(trial.node.definition["question"])
+        logger.info(trial.answer)
 
         super().finalize_trial(answer, trial, experiment, participant)
 
@@ -452,7 +507,7 @@ trial_maker = KnowledgeTrialMaker(
 class Exp(psynet.experiment.Experiment):
     label = "Adaptive Bayesian testing demo"
     initial_recruitment_size = 1
-    test_n_bots = 2
+    test_n_bots = 200
 
     timeline = Timeline(
         trial_maker,
