@@ -126,11 +126,15 @@ class AdaptiveLearner:
             theta = theta.unsqueeze(-1)
 
             item_idx = design.squeeze(-1).long()
-            selected_difficulties = self.current_difficulty_means[item_idx]
-            selected_difficulties = selected_difficulties.unsqueeze(-1)
+            difficulties = pyro.sample(
+                "difficulties",
+                dist.Normal(
+                    self.current_difficulty_means[item_idx],
+                    self.current_difficulty_sds[item_idx])
+            ).unsqueeze(-1)
 
             intercept = self.current_intercept_mean
-            logit_p = (theta - selected_difficulties) + intercept
+            logit_p = (theta - difficulties) + intercept
 
             y = pyro.sample("y", dist.Bernoulli(logits=logit_p).to_event(1))
 
@@ -247,7 +251,7 @@ class AdaptiveLearner:
             design_model,
             candidate_designs,
             "y",
-            "theta",
+            ["theta", "difficulties"],
             num_samples=100,
             num_steps=self.num_steps,
             guide=self._marginal_guide,
@@ -280,10 +284,10 @@ class AdaptiveLearner:
 
         return optimal_item, eig.detach().max(), eig
 
-    def get_optimal_test_for_participant(self, participant_id, exclude: list = []):
-        """Get the optimal test item for a given participant"""
-        item_id, eig_value, eig_scores = self.get_optimal_test(participant_id, exclude)
-        return item_id
+    # def get_optimal_test_for_participant(self, participant_id, exclude: list = []):
+    #     """Get the optimal test item for a given participant"""
+    #     item_id, eig_value, eig_scores = self.get_optimal_test(participant_id, exclude)
+    #     return item_id
 
     def administer_response(self, participant_id, item_id, response):
         """Record a participant's response to an item"""
@@ -432,7 +436,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         exclude = [item for item in range(self.learner.num_items) if item not in candidate_items]
 
         # choose best item
-        next_node_id = self.learner.get_optimal_test_for_participant(pid, exclude=exclude)
+        next_node_id, eig_value, eig_scores = self.learner.get_optimal_test(pid, exclude)
+
+        if eig_value < 0.025:
+            return []
 
         # recover the retained candidate
         for candidate in candidates:
