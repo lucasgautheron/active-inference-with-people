@@ -252,11 +252,11 @@ class AdaptiveLearner:
             candidate_designs,
             "y",
             ["theta", "difficulties"],
-            num_samples=100,
+            num_samples=200,
             num_steps=self.num_steps,
             guide=self._marginal_guide,
             optim=optimizer,
-            final_num_samples=1000,
+            final_num_samples=2000,
         )
 
         # Find the item with maximum EIG
@@ -278,7 +278,7 @@ class AdaptiveLearner:
             plt.plot(x, y, label="Item difficulty", alpha=0.2, color=color)
             plt.scatter([self.current_difficulty_means[item] - self.current_intercept_mean], [eig.detach()[i]],
                         color=color)
-        plt.savefig("test_{}.png".format(participant_id))
+        plt.savefig("output/test_{}.png".format(participant_id))
 
         plt.clf()
 
