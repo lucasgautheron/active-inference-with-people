@@ -9,6 +9,8 @@ from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage
 from psynet.timeline import Timeline
 from psynet.trial.static import StaticNetwork, StaticNode, StaticTrial, StaticTrialMaker
+from psynet.consent import MainConsent
+from psynet.demography.general import BasicDemography, Income
 
 import torch
 import pyro
@@ -25,7 +27,9 @@ from os.path import exists
 
 import pandas as pd
 
-logging.basicConfig(level=logging.INFO)
+DEBUG_MODE = True
+
+logging.basicConfig(level=logging.DEBUG if DEBUG_MODE else logging.INFO)
 logger = logging.getLogger()
 
 
@@ -263,31 +267,27 @@ class AdaptiveLearner:
         best_idx = torch.argmax(eig)
         optimal_item = available_items[best_idx]
 
-        x = np.linspace(-3, +3, 200)
-        y = norm.pdf(x, loc=self.current_theta_means[participant_id],
-                     scale=self.current_theta_sds[participant_id])
+        if DEBUG_MODE:
+            x = np.linspace(-3, +3, 200)
+            y = norm.pdf(x, loc=self.current_theta_means[participant_id],
+                         scale=self.current_theta_sds[participant_id])
 
-        plt.plot(x, y, label="Participant ability")
+            plt.plot(x, y, label="Participant ability")
 
-        cmap = plt.get_cmap("tab10")
-        for i in range(len(available_items)):
-            item = available_items[i]
-            color = cmap(i)
-            y = norm.pdf(x, loc=self.current_difficulty_means[item] - self.current_intercept_mean,
-                         scale=np.sqrt(self.current_difficulty_sds[item] ** 2 + self.current_intercept_sd ** 2))
-            plt.plot(x, y, label="Item difficulty", alpha=0.2, color=color)
-            plt.scatter([self.current_difficulty_means[item] - self.current_intercept_mean], [eig.detach()[i]],
-                        color=color)
-        plt.savefig("output/test_{}.png".format(participant_id))
+            cmap = plt.get_cmap("tab10")
+            for i in range(len(available_items)):
+                item = available_items[i]
+                color = cmap(i)
+                y = norm.pdf(x, loc=self.current_difficulty_means[item] - self.current_intercept_mean,
+                             scale=np.sqrt(self.current_difficulty_sds[item] ** 2 + self.current_intercept_sd ** 2))
+                plt.plot(x, y, label="Item difficulty", alpha=0.2, color=color)
+                plt.scatter([self.current_difficulty_means[item] - self.current_intercept_mean], [eig.detach()[i]],
+                            color=color)
 
-        plt.clf()
+            plt.savefig("output/test_{}.png".format(participant_id))
+            plt.clf()
 
         return optimal_item, eig.detach().max(), eig
-
-    # def get_optimal_test_for_participant(self, participant_id, exclude: list = []):
-    #     """Get the optimal test item for a given participant"""
-    #     item_id, eig_value, eig_scores = self.get_optimal_test(participant_id, exclude)
-    #     return item_id
 
     def administer_response(self, participant_id, item_id, response):
         """Record a participant's response to an item"""
@@ -474,7 +474,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         super().finalize_trial(answer, trial, experiment, participant)
 
 
-trial_maker = KnowledgeTrialMaker(
+knowledge_trial_maker = KnowledgeTrialMaker(
     id_="knowledge",
     trial_class=KnowledgeTrial,
     expected_trials_per_participant=15,
@@ -494,5 +494,8 @@ class Exp(psynet.experiment.Experiment):
     test_n_bots = 200
 
     timeline = Timeline(
-        trial_maker,
+        MainConsent(),
+        BasicDemography(),
+        Income(),
+        knowledge_trial_maker,
     )
