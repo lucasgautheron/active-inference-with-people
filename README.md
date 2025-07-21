@@ -10,6 +10,11 @@ item-response model.
 The optimal challenge to present to each participant is evaluated at every trial by maximizing the expected information
 gain using variational inference methods for efficient computation.
 
+## TODO
+
+ - Factor uncertainty about the item difficulty parameters into the EIG calculation
+ - Flexible amount of trial (stop when expected information gain is low?)
+
 # PsyNet
 
 This experiment is implemented using the [PsyNet framework](https://www.psynet.dev/).
