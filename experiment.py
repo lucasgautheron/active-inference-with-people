@@ -8,7 +8,10 @@ import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage
 from psynet.timeline import Timeline
-from psynet.trial.static import StaticNetwork, StaticNode, StaticTrial, StaticTrialMaker
+from psynet.trial.static import (
+    StaticNetwork, StaticNode, StaticTrial,
+    StaticTrialMaker,
+)
 from psynet.consent import MainConsent
 from psynet.demography.general import BasicDemography, Income
 
@@ -41,7 +44,7 @@ class Oracle:
 
         self.answers = [
             {
-                "answers": answers[i]
+                "answers": answers[i],
             }
             for i in range(len(answers))
         ]
@@ -79,15 +82,19 @@ class AdaptiveLearner:
         self.current_participants = []
 
         # Current posterior estimates for individual thetas
-        self.current_theta_means = torch.tensor([0.0] * max_participants)  # Individual theta posterior means
-        self.current_theta_sds = torch.tensor([1.0] * max_participants)  # Individual theta standard deviations
+        self.current_theta_means = torch.tensor(
+            [0.0] * max_participants,
+        )  # Individual theta posterior means
+        self.current_theta_sds = torch.tensor(
+            [1.0] * max_participants,
+        )  # Individual theta standard deviations
 
         # Current posterior estimates for difficulties
         self.current_difficulty_means = torch.tensor(
-            [self.prior_mean_difficulty] * self.num_items
+            [self.prior_mean_difficulty] * self.num_items,
         )
         self.current_difficulty_sds = torch.tensor(
-            [self.prior_sd_difficulty] * self.num_items
+            [self.prior_sd_difficulty] * self.num_items,
         )
 
         # Current posterior estimates for intercept
@@ -104,7 +111,9 @@ class AdaptiveLearner:
         new_participant_id = len(self.current_participants)
         self.participants[new_participant_id] = participant.id
         self.current_participants.append(new_participant_id)
-        logger.debug(f"AdaptiveLearner added new participant: {new_participant_id}")
+        logger.debug(
+            f"AdaptiveLearner added new participant: {new_participant_id}",
+        )
 
         return new_participant_id
 
@@ -124,8 +133,8 @@ class AdaptiveLearner:
                 "theta",
                 dist.Normal(
                     self.current_theta_means[target_participant],
-                    self.current_theta_sds[target_participant]
-                )
+                    self.current_theta_sds[target_participant],
+                ),
             )
             theta = theta.unsqueeze(-1)
 
@@ -134,7 +143,8 @@ class AdaptiveLearner:
                 "difficulties",
                 dist.Normal(
                     self.current_difficulty_means[item_idx],
-                    self.current_difficulty_sds[item_idx])
+                    self.current_difficulty_sds[item_idx],
+                ),
             ).unsqueeze(-1)
 
             intercept = self.current_intercept_mean
@@ -160,8 +170,11 @@ class AdaptiveLearner:
         # Sample difficulty parameters for all potential items
         difficulties = pyro.sample(
             "difficulties",
-            dist.Normal(self.prior_mean_difficulty, self.prior_sd_difficulty).expand(
-                [self.num_items]
+            dist.Normal(
+                self.prior_mean_difficulty,
+                self.prior_sd_difficulty,
+            ).expand(
+                [self.num_items],
             ).to_event(1),
         )
 
@@ -195,7 +208,12 @@ class AdaptiveLearner:
             torch.full([max_participant], 1.0),
             constraint=positive,
         )
-        pyro.sample("thetas", dist.Normal(posterior_theta_means, posterior_theta_sds).to_event(1))
+        pyro.sample(
+            "thetas", dist.Normal(
+                posterior_theta_means,
+                posterior_theta_sds,
+            ).to_event(1),
+        )
 
         # Guide for difficulties - for all potential items
         posterior_mean_difficulties = pyro.param(
@@ -209,7 +227,10 @@ class AdaptiveLearner:
         )
         pyro.sample(
             "difficulties",
-            dist.Normal(posterior_mean_difficulties, posterior_sd_difficulties).to_event(1),
+            dist.Normal(
+                posterior_mean_difficulties,
+                posterior_sd_difficulties,
+            ).to_event(1),
         )
 
         # Guide for intercept
@@ -223,7 +244,8 @@ class AdaptiveLearner:
             constraint=positive,
         )
         pyro.sample(
-            "intercept", dist.Normal(posterior_mean_intercept, posterior_sd_intercept)
+            "intercept",
+            dist.Normal(posterior_mean_intercept, posterior_sd_intercept),
         )
 
     def _marginal_guide(self, design, observation_labels, target_labels):
@@ -239,16 +261,21 @@ class AdaptiveLearner:
 
         # Candidate designs (available items)
         available_items = [i for i in range(self.num_items) if i not in exclude]
-        candidate_designs = torch.tensor(available_items, dtype=torch.float).unsqueeze(-1)
+        candidate_designs = torch.tensor(
+            available_items,
+            dtype=torch.float,
+        ).unsqueeze(-1)
 
         if len(available_items) == 0:
             raise ValueError("No available items to choose from")
 
-        optimizer = pyro.optim.ExponentialLR({
-            "optimizer": torch.optim.Adam,
-            "optim_args": {"lr": self.start_lr},
-            "gamma": (self.end_lr / self.start_lr) ** (1 / self.num_steps),
-        })
+        optimizer = pyro.optim.ExponentialLR(
+            {
+                "optimizer": torch.optim.Adam,
+                "optim_args": {"lr": self.start_lr},
+                "gamma": (self.end_lr / self.start_lr) ** (1 / self.num_steps),
+            },
+        )
 
         # Compute Expected Information Gain for each candidate item
         eig = marginal_eig(
@@ -269,8 +296,10 @@ class AdaptiveLearner:
 
         if DEBUG_MODE:
             x = np.linspace(-3, +3, 200)
-            y = norm.pdf(x, loc=self.current_theta_means[participant_id],
-                         scale=self.current_theta_sds[participant_id])
+            y = norm.pdf(
+                x, loc=self.current_theta_means[participant_id],
+                scale=self.current_theta_sds[participant_id],
+            )
 
             plt.plot(x, y, label="Participant ability")
 
@@ -278,11 +307,23 @@ class AdaptiveLearner:
             for i in range(len(available_items)):
                 item = available_items[i]
                 color = cmap(i)
-                y = norm.pdf(x, loc=self.current_difficulty_means[item] - self.current_intercept_mean,
-                             scale=np.sqrt(self.current_difficulty_sds[item] ** 2 + self.current_intercept_sd ** 2))
+                y = norm.pdf(
+                    x, loc=self.current_difficulty_means[
+                               item] - self.current_intercept_mean,
+                    scale=np.sqrt(
+                        self.current_difficulty_sds[
+                            item] ** 2 + self.current_intercept_sd ** 2,
+                    ),
+                )
                 plt.plot(x, y, label="Item difficulty", alpha=0.2, color=color)
-                plt.scatter([self.current_difficulty_means[item] - self.current_intercept_mean], [eig.detach()[i]],
-                            color=color)
+                plt.scatter(
+                    [
+                        self.current_difficulty_means[
+                            item] - self.current_intercept_mean,
+                    ],
+                    [eig.detach()[i]],
+                    color=color,
+                )
 
             plt.savefig("output/test_{}.png".format(participant_id))
             plt.clf()
@@ -297,10 +338,10 @@ class AdaptiveLearner:
 
         # Store the result
         self.participant_indices = torch.cat(
-            [self.participant_indices, torch.tensor([participant_id])], dim=0
+            [self.participant_indices, torch.tensor([participant_id])], dim=0,
         )
         self.item_indices = torch.cat(
-            [self.item_indices, torch.tensor([item_id])], dim=0
+            [self.item_indices, torch.tensor([item_id])], dim=0,
         )
         self.responses = torch.cat([self.responses, response.expand(1)])
 
@@ -328,9 +369,15 @@ class AdaptiveLearner:
         # Extract updated parameters
         posterior_theta_means = pyro.param("posterior_theta_means").detach()
         posterior_theta_sds = pyro.param("posterior_theta_sds").detach()
-        posterior_difficulty_means = pyro.param("posterior_mean_difficulties").detach()
-        posterior_difficulty_sds = pyro.param("posterior_sd_difficulties").detach()
-        posterior_intercept_mean = pyro.param("posterior_mean_intercept").detach()
+        posterior_difficulty_means = pyro.param(
+            "posterior_mean_difficulties",
+        ).detach()
+        posterior_difficulty_sds = pyro.param(
+            "posterior_sd_difficulties",
+        ).detach()
+        posterior_intercept_mean = pyro.param(
+            "posterior_mean_intercept",
+        ).detach()
         posterior_intercept_sd = pyro.param("posterior_sd_intercept").detach()
 
         # Resize tracking tensors if needed
@@ -351,8 +398,10 @@ class AdaptiveLearner:
             self.current_theta_sds = new_theta_sds
 
         # Update with posterior values
-        self.current_theta_means[: posterior_theta_means.size(0)] = posterior_theta_means
-        self.current_theta_sds[: posterior_theta_sds.size(0)] = posterior_theta_sds
+        self.current_theta_means[
+        : posterior_theta_means.size(0)] = posterior_theta_means
+        self.current_theta_sds[
+        : posterior_theta_sds.size(0)] = posterior_theta_sds
         self.current_difficulty_means = posterior_difficulty_means
         self.current_difficulty_sds = posterior_difficulty_sds
         self.current_intercept_mean = posterior_intercept_mean
@@ -360,11 +409,15 @@ class AdaptiveLearner:
 
 
 class KnowledgeTrial(StaticTrial):
-    time_estimate = 10
+    time_estimate = 10  # how long it should take to complete each trial, in seconds
 
     def __init__(self, experiment, node, participant, *args, **kwargs):
+        """
+        Initialize the trial
+        """
         super().__init__(experiment, node, participant, *args, **kwargs)
 
+        # Keeps track of whether the participant correctly answered
         self.var.correct = None
 
     def show_trial(self, experiment, participant):
@@ -376,11 +429,14 @@ class KnowledgeTrial(StaticTrial):
                 f"""
                 <p id='question'>{question}</p>
                 (Leave empty if you do not know)
-                """
+                """,
             ),
             TextControl(
                 block_copy_paste=True,
-                bot_response=lambda: oracle.answer(participant.id, self.definition["item_id"])
+                bot_response=lambda: oracle.answer(
+                    participant.id,
+                    self.definition["item_id"],
+                ),
             ),
             time_estimate=self.time_estimate,
         )
@@ -391,12 +447,39 @@ class KnowledgeTrial(StaticTrial):
         return InfoPage(
             Markup("Congratulations, this is correct!")
             if self.var.correct == True
-            else Markup("Nice try, but no :(")
+            else Markup("Nice try, but no :("),
         )
 
 
 class KnowledgeTrialMaker(StaticTrialMaker):
-    def __init__(self, *args, setup: str = "adaptive", **kwargs):
+    def __init__(self, *args, **kwargs):
+        """
+        Initialize the trial maker
+        with the list of all possibles challenges
+        """
+        nodes = self.load_nodes()
+
+        super().__init__(
+            id_="knowledge",
+            # how many questions administered to each participant (estimate)
+            expected_trials_per_participant=15,
+            # how many questions administered to each participant (maximum)
+            max_trials_per_participant=15,
+            # can the same question be shown multiple times?
+            allow_repeated_nodes=False,
+            # the class of the trials delivered by the trial maker
+            trial_class=KnowledgeTrial,
+            # do not repeat trials on participants,
+            # as is often done for assessing reliability
+            n_repeat_trials=0,
+            # the list of all challenges
+            nodes=nodes,
+        )
+
+        logger.info("Initializing adaptive learner.")
+        self.learner = AdaptiveLearner(len(nodes))
+
+    def load_nodes(self):
         questions = pd.read_csv("static/questions.csv").head(15)
 
         nodes = [
@@ -404,22 +487,15 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 definition={
                     "item_id": i,
                     "question": question["question"],
-                    "answers": question["answers"].split("|")
-                }
+                    "answers": question["answers"].split("|"),
+                },
             )
             for i, question in enumerate(questions.to_dict(orient="records"))
         ]
 
-        super().__init__(*args, **kwargs, nodes=nodes)
-
-        self.setup = setup
-        logger.info("Initializing adaptive learner?")
-        self.learner = AdaptiveLearner(len(nodes))
+        return nodes
 
     def custom_network_filter(self, candidates, participant):
-        if self.setup == "static":
-            return candidates
-
         logger.info("Getting data for participant")
         if participant.id not in self.learner.participants.values():
             logger.info("New participant")
@@ -430,26 +506,35 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         candidate_items = []
         for candidate in candidates:
-            candidate_items += [node.definition["item_id"] for node in candidate.nodes()]
+            candidate_items += [node.definition["item_id"] for node in
+                                candidate.nodes()]
 
         # exclude items that are not among the candidate items
-        exclude = [item for item in range(self.learner.num_items) if item not in candidate_items]
+        exclude = [item for item in range(self.learner.num_items) if
+                   item not in candidate_items]
 
         # choose best item
-        next_node_id, eig_value, eig_scores = self.learner.get_optimal_test(pid, exclude)
+        next_node_id, eig_value, eig_scores = self.learner.get_optimal_test(
+            pid,
+            exclude,
+        )
 
         if eig_value < 0.025:
             return []
 
         # recover the retained candidate
         for candidate in candidates:
-            if any([node.definition["item_id"] == next_node_id for node in candidate.nodes()]):
+            if any(
+                    [node.definition["item_id"] == next_node_id for node in
+                     candidate.nodes()],
+            ):
                 return [candidate]
 
         return candidates
 
     def finalize_trial(self, answer, trial, experiment, participant):
-        trial.var.correct = trial.answer.lower() in trial.node.definition["answers"]
+        trial.var.correct = trial.answer.lower() in trial.node.definition[
+            "answers"]
 
         logger.info("Finalizing trial, looking for participant")
         if participant.id not in self.learner.participants.values():
@@ -458,34 +543,25 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         else:
             pid = self.learner.get_participant(participant)
 
-        self.learner.administer_response(pid, trial.node.definition["item_id"], trial.var.correct)
+        self.learner.administer_response(
+            pid, trial.node.definition["item_id"],
+            trial.var.correct,
+        )
         self.learner.update_posterior()
 
         mu = self.learner.current_theta_means[pid]
         sd = self.learner.current_theta_sds[pid]
         logger.info(f"Posterior participant ability: N({mu:.2f}, {sd:.2f})")
 
-        mu = self.learner.current_difficulty_means[trial.node.definition["item_id"]]
-        sd = self.learner.current_difficulty_sds[trial.node.definition["item_id"]]
+        mu = self.learner.current_difficulty_means[
+            trial.node.definition["item_id"]]
+        sd = self.learner.current_difficulty_sds[
+            trial.node.definition["item_id"]]
         logger.info(f"Posterior item difficulty: N({mu:.2f}, {sd:.2f})")
         logger.info(trial.node.definition["question"])
         logger.info(trial.answer)
 
         super().finalize_trial(answer, trial, experiment, participant)
-
-
-knowledge_trial_maker = KnowledgeTrialMaker(
-    id_="knowledge",
-    trial_class=KnowledgeTrial,
-    expected_trials_per_participant=15,
-    max_trials_per_participant=15,
-    allow_repeated_nodes=False,
-    balance_across_nodes=True,
-    target_n_participants=1,
-    target_trials_per_node=None,
-    recruit_mode="n_participants",
-    n_repeat_trials=1,
-)
 
 
 class Exp(psynet.experiment.Experiment):
@@ -497,5 +573,5 @@ class Exp(psynet.experiment.Experiment):
         MainConsent(),
         BasicDemography(),
         Income(),
-        knowledge_trial_maker,
+        KnowledgeTrialMaker(),
     )
