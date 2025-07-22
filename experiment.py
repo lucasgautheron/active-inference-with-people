@@ -59,10 +59,9 @@ oracle = Oracle()
 class AdaptiveLearner:
     """Adaptive test design system using Bayesian optimization with hierarchical theta model"""
 
-    def __init__(self, num_items, max_participants=1000):
+    def __init__(self, num_items):
         logger.debug("Initializing adaptive learner.")
 
-        self.max_participants = max_participants
         self.num_items = num_items
 
         # Prior parameters for difficulty
@@ -79,27 +78,23 @@ class AdaptiveLearner:
         self.responses = torch.empty(0)
 
         self.participants = {}
-        self.current_participants = []
+        self.posterior_participants = []
 
         # Current posterior estimates for individual thetas
-        self.current_theta_means = torch.tensor(
-            [0.0] * max_participants,
-        )  # Individual theta posterior means
-        self.current_theta_sds = torch.tensor(
-            [1.0] * max_participants,
-        )  # Individual theta standard deviations
+        self.posterior_theta_means = torch.empty(0)
+        self.posterior_theta_sds = torch.empty(0)
 
         # Current posterior estimates for difficulties
-        self.current_difficulty_means = torch.tensor(
+        self.posterior_difficulty_means = torch.tensor(
             [self.prior_mean_difficulty] * self.num_items,
         )
-        self.current_difficulty_sds = torch.tensor(
+        self.posterior_difficulty_sds = torch.tensor(
             [self.prior_sd_difficulty] * self.num_items,
         )
 
         # Current posterior estimates for intercept
-        self.current_intercept_mean = torch.tensor(self.prior_mean_intercept)
-        self.current_intercept_sd = torch.tensor(self.prior_sd_intercept)
+        self.posterior_intercept_mean = torch.tensor(self.prior_mean_intercept)
+        self.posterior_intercept_sd = torch.tensor(self.prior_sd_intercept)
 
         # EIG computation parameters
         self.num_steps = 1000
@@ -108,9 +103,24 @@ class AdaptiveLearner:
 
     def add_participant(self, participant):
         """Add a new participant to the study"""
-        new_participant_id = len(self.current_participants)
+        new_participant_id = len(self.posterior_participants)
         self.participants[new_participant_id] = participant.id
-        self.current_participants.append(new_participant_id)
+        self.posterior_participants.append(new_participant_id)
+
+        # Expand theta tracking tensors for new participant
+        self.posterior_theta_means = torch.cat(
+            [
+                self.posterior_theta_means,
+                torch.tensor([0.0])  # Prior mean for new participant
+            ]
+        )
+        self.posterior_theta_sds = torch.cat(
+            [
+                self.posterior_theta_sds,
+                torch.tensor([1.0])  # Prior std for new participant
+            ]
+        )
+
         logger.debug(
             f"AdaptiveLearner added new participant: {new_participant_id}",
         )
@@ -132,8 +142,8 @@ class AdaptiveLearner:
             theta = pyro.sample(
                 "theta",
                 dist.Normal(
-                    self.current_theta_means[target_participant],
-                    self.current_theta_sds[target_participant],
+                    self.posterior_theta_means[target_participant],
+                    self.posterior_theta_sds[target_participant],
                 ),
             )
             theta = theta.unsqueeze(-1)
@@ -142,12 +152,12 @@ class AdaptiveLearner:
             difficulties = pyro.sample(
                 "difficulties",
                 dist.Normal(
-                    self.current_difficulty_means[item_idx],
-                    self.current_difficulty_sds[item_idx],
+                    self.posterior_difficulty_means[item_idx],
+                    self.posterior_difficulty_sds[item_idx],
                 ),
             ).unsqueeze(-1)
 
-            intercept = self.current_intercept_mean
+            intercept = self.posterior_intercept_mean
             logit_p = (theta - difficulties) + intercept
 
             y = pyro.sample("y", dist.Bernoulli(logits=logit_p).to_event(1))
@@ -297,8 +307,8 @@ class AdaptiveLearner:
         if DEBUG_MODE:
             x = np.linspace(-3, +3, 200)
             y = norm.pdf(
-                x, loc=self.current_theta_means[participant_id],
-                scale=self.current_theta_sds[participant_id],
+                x, loc=self.posterior_theta_means[participant_id],
+                scale=self.posterior_theta_sds[participant_id],
             )
 
             plt.plot(x, y, label="Participant ability")
@@ -308,18 +318,18 @@ class AdaptiveLearner:
                 item = available_items[i]
                 color = cmap(i)
                 y = norm.pdf(
-                    x, loc=self.current_difficulty_means[
-                               item] - self.current_intercept_mean,
+                    x, loc=self.posterior_difficulty_means[
+                               item] - self.posterior_intercept_mean,
                     scale=np.sqrt(
-                        self.current_difficulty_sds[
-                            item] ** 2 + self.current_intercept_sd ** 2,
+                        self.posterior_difficulty_sds[
+                            item] ** 2 + self.posterior_intercept_sd ** 2,
                     ),
                 )
                 plt.plot(x, y, label="Item difficulty", alpha=0.2, color=color)
                 plt.scatter(
                     [
-                        self.current_difficulty_means[
-                            item] - self.current_intercept_mean,
+                        self.posterior_difficulty_means[
+                            item] - self.posterior_intercept_mean,
                     ],
                     [eig.detach()[i]],
                     color=color,
@@ -367,45 +377,26 @@ class AdaptiveLearner:
                 logger.debug(f"  Iteration {i}, ELBO: {elbo:.3f}")
 
         # Extract updated parameters
-        posterior_theta_means = pyro.param("posterior_theta_means").detach()
-        posterior_theta_sds = pyro.param("posterior_theta_sds").detach()
-        posterior_difficulty_means = pyro.param(
+        # Extract updated parameters and directly assign
+        self.posterior_theta_means = pyro.param(
+            "posterior_theta_means"
+            ).detach().clone()
+        self.posterior_theta_sds = pyro.param(
+            "posterior_theta_sds"
+            ).detach().clone()
+
+        self.posterior_difficulty_means = pyro.param(
             "posterior_mean_difficulties",
-        ).detach()
-        posterior_difficulty_sds = pyro.param(
+        ).detach().clone()
+        self.posterior_difficulty_sds = pyro.param(
             "posterior_sd_difficulties",
-        ).detach()
-        posterior_intercept_mean = pyro.param(
+        ).detach().clone()
+        self.posterior_intercept_mean = pyro.param(
             "posterior_mean_intercept",
-        ).detach()
-        posterior_intercept_sd = pyro.param("posterior_sd_intercept").detach()
-
-        # Resize tracking tensors if needed
-        if posterior_theta_means.size(0) > self.current_theta_means.size(0):
-            new_size = posterior_theta_means.size(0)
-            new_theta_means = torch.zeros((new_size,))
-            new_theta_sds = torch.full((new_size,), 1.0)
-
-            # Copy existing values
-            new_theta_means[: self.current_theta_means.size(0)] = (
-                self.current_theta_means[: self.current_theta_means.size(0)]
-            )
-            new_theta_sds[: self.current_theta_sds.size(0)] = (
-                self.current_theta_sds[: self.current_theta_sds.size(0)]
-            )
-
-            self.current_theta_means = new_theta_means
-            self.current_theta_sds = new_theta_sds
-
-        # Update with posterior values
-        self.current_theta_means[
-        : posterior_theta_means.size(0)] = posterior_theta_means
-        self.current_theta_sds[
-        : posterior_theta_sds.size(0)] = posterior_theta_sds
-        self.current_difficulty_means = posterior_difficulty_means
-        self.current_difficulty_sds = posterior_difficulty_sds
-        self.current_intercept_mean = posterior_intercept_mean
-        self.current_intercept_sd = posterior_intercept_sd
+        ).detach().clone()
+        self.posterior_intercept_sd = pyro.param(
+            "posterior_sd_intercept"
+            ).detach().clone()
 
 
 class KnowledgeTrial(StaticTrial):
@@ -549,13 +540,13 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
         self.learner.update_posterior()
 
-        mu = self.learner.current_theta_means[pid]
-        sd = self.learner.current_theta_sds[pid]
+        mu = self.learner.posterior_theta_means[pid]
+        sd = self.learner.posterior_theta_sds[pid]
         logger.info(f"Posterior participant ability: N({mu:.2f}, {sd:.2f})")
 
-        mu = self.learner.current_difficulty_means[
+        mu = self.learner.posterior_difficulty_means[
             trial.node.definition["item_id"]]
-        sd = self.learner.current_difficulty_sds[
+        sd = self.learner.posterior_difficulty_sds[
             trial.node.definition["item_id"]]
         logger.info(f"Posterior item difficulty: N({mu:.2f}, {sd:.2f})")
         logger.info(trial.node.definition["question"])
