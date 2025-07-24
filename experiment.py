@@ -6,7 +6,7 @@ from markupsafe import Markup
 
 import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
-from psynet.page import InfoPage
+from psynet.page import InfoPage, SuccessfulEndPage
 from psynet.timeline import Timeline
 from psynet.trial.static import (
     StaticNetwork, StaticNode, StaticTrial,
@@ -37,6 +37,11 @@ logger = logging.getLogger()
 
 
 class Oracle:
+    """
+    Oracle for simulating the experiment
+    using real human data from Dubourg et al., 2025
+    """
+
     def __init__(self):
         answers = pd.read_csv("static/answers.csv")
         answers = np.stack(answers.values)[:, :15]
@@ -486,8 +491,8 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             allow_repeated_nodes=False,
             # the class of the trials delivered by the trial maker
             trial_class=KnowledgeTrial,
-            # do not repeat trials on participants,
-            # as is often done for assessing reliability
+            # do not repeat trials on the same participants,
+            # (as is often done for assessing reliability)
             n_repeat_trials=0,
             # the list of all challenges
             nodes=nodes,
@@ -596,4 +601,5 @@ class Exp(psynet.experiment.Experiment):
         BasicDemography(),
         Income(),
         KnowledgeTrialMaker(),
+        SuccessfulEndPage()
     )
