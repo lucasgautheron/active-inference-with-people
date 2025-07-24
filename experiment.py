@@ -135,44 +135,42 @@ class AdaptiveLearner:
 
         raise Exception(f"Participant {participant.id} not found")
 
-    def _make_design_model(self, target_participant):
-        """Create a model for a specific participant that takes item indices as design"""
+        def _make_design_model(self, target_participant):
+            """Create a model for a specific participant that takes item indices as design"""
 
-        def model(design):
-            # Sample ability parameter for the target participant
-            theta = pyro.sample(
-                "theta",
-                dist.Normal(
-                    self.posterior_theta_means[target_participant],
-                    self.posterior_theta_sds[target_participant],
-                ),
-            )
-            theta = theta.unsqueeze(-1)
+            def model(design):
+                # Sample ability parameter for the target participant
+                theta = pyro.sample(
+                    "theta",
+                    dist.Normal(
+                        self.posterior_theta_means[target_participant],
+                        self.posterior_theta_sds[target_participant],
+                    ),
+                )
+                theta = theta.unsqueeze(-1)
 
-            item_idx = design.squeeze(-1).long()
-            difficulties = pyro.sample(
-                "difficulties",
-                dist.Normal(
-                    self.posterior_difficulty_means[item_idx],
-                    self.posterior_difficulty_sds[item_idx],
-                ),
-            ).unsqueeze(-1)
-            # difficulties = self.posterior_difficulty_means[item_idx].unsqueeze(-1)
+                item_idx = design.squeeze(-1).long()
+                difficulties = pyro.sample(
+                    "difficulties",
+                    dist.Normal(
+                        self.posterior_difficulty_means[item_idx],
+                        self.posterior_difficulty_sds[item_idx],
+                    ),
+                ).unsqueeze(-1)
 
-            intercept = pyro.sample(
-                "intercept", dist.Normal(
-                    self.posterior_intercept_mean,
-                    self.posterior_intercept_sd,
-                ),
-            ).unsqueeze(-1)
-            # intercept = self.posterior_intercept_mean
-            logit_p = (theta - difficulties) + intercept
+                intercept = pyro.sample(
+                    "intercept", dist.Normal(
+                        self.posterior_intercept_mean,
+                        self.posterior_intercept_sd,
+                    ),
+                ).unsqueeze(-1)
+                logit_p = (theta - difficulties) + intercept
 
-            y = pyro.sample("y", dist.Bernoulli(logits=logit_p).to_event(1))
+                y = pyro.sample("y", dist.Bernoulli(logits=logit_p).to_event(1))
 
-            return y
+                return y
 
-        return model
+            return model
 
     def _model(self, participant_indices, item_indices):
         """Model of the data-generating process"""
