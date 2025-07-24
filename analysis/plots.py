@@ -29,43 +29,6 @@ def load_df(source):
 adaptive = load_df('output/KnowledgeTrial_adaptive.csv')
 static = load_df('output/KnowledgeTrial_static.csv')
 
-# Create a figure with subplots for different visualization approaches
-fig, ax = plt.subplots(1, 1, figsize=(20, 16))
-
-# 1. Individual lines for each participant (top-left)
-participants = sorted(adaptive['participant_id'].unique())
-
-# Create a color palette with enough colors for all participants
-colors_adaptive = plt.cm.Reds(np.linspace(0, 1, len(participants)))
-colors_static = plt.cm.Blues(np.linspace(0, 1, len(participants)))
-
-for i, participant in enumerate(participants):
-    p_data_adaptive = adaptive[
-        adaptive['participant_id'] == participant].sort_values(
-        'id',
-    )
-    p_data_static = static[static['participant_id'] == participant].sort_values(
-        'id',
-    )
-
-    ax.plot(
-        range(1, len(p_data_adaptive) + 1), p_data_adaptive['entropy'],
-        alpha=0.7, linewidth=1, color=colors_adaptive[i],
-        label=f'P{participant}',
-    )
-    ax.plot(
-        range(1, len(p_data_static) + 1), p_data_static['entropy'],
-        alpha=0.7, linewidth=1, color=colors_static[i], label=f'P{participant}',
-    )
-
-ax.set_xlabel('Trial Number')
-ax.set_ylabel('Ability Mean')
-ax.set_title('Individual Participant Trajectories')
-ax.grid(True, alpha=0.3)
-# Don't show legend for individual lines as it would be too cluttered
-
-plt.show()
-
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 n = adaptive.groupby("participant_id")["id"].count()
@@ -76,7 +39,11 @@ theta_static = samples_static['theta'].mean(axis=0)
 
 difficulty_static = samples_static["d"].mean(axis=0)
 
-scatter = ax.scatter(theta_static, theta_adaptive, c=n, cmap=plt.cm.Blues, s=4)
+ax.axline((0,0), slope=1, color="black", lw=1, alpha=0.5)
+scatter = ax.scatter(
+    theta_static, theta_adaptive, c=n, cmap=plt.cm.Blues, s=8,
+    facecolors='none', edgecolors='black', lw=0.1, alpha=0.33,
+)
 ax.set_xlabel(r"Posterior $\theta_i$ (static)")
 ax.set_ylabel(r"Posterior $\theta_i$ (adaptive)")
 
@@ -92,7 +59,7 @@ ax.text(
 # Add colorbar with legend
 cbar = plt.colorbar(scatter, ax=ax)
 cbar.set_label(
-    r'$n_{i}^{trials}$', rotation=270, labelpad=15,
+    r'$n_{i}$\textsuperscript{trials}', rotation=270, labelpad=15,
 )  # 'n' as the colorbar label
 plt.show()
 plt.savefig("output/theta_comparison.pdf", bbox_inches="tight")

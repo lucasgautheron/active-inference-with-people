@@ -168,7 +168,7 @@ def main():
         "output/KnowledgeTrial_adaptive.csv",
     )
     fit, stan_data = fit_irt_model(
-        df, chains=4, iter_warmup=1000, iter_sampling=1000,
+        df, chains=4, iter_warmup=1000, iter_sampling=2000,
     )
     stan_vars = save_stan_samples(fit, 'output/irt_samples_adaptive.npz')
 
@@ -177,7 +177,7 @@ def main():
         "output/KnowledgeTrial_static.csv",
     )
     fit, stan_data = fit_irt_model(
-        df, chains=4, iter_warmup=1000, iter_sampling=1000,
+        df, chains=4, iter_warmup=1000, iter_sampling=2000,
     )
     stan_vars = save_stan_samples(fit, 'output/irt_samples_static.npz')
 
