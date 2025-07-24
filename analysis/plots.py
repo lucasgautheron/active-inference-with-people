@@ -111,7 +111,9 @@ sns.kdeplot(
 ax.set_xlabel("Challenge difficulty")
 ax.set_ylabel("Number of trials")
 ax.set_ylim(0, None)
-fig.legend(ncol=2, loc='upper center', bbox_to_anchor=(0.5, 1.15))
+fig.legend(
+    ncol=2, loc='upper center', bbox_to_anchor=(0.5, 1.15), frameon=False,
+)
 plt.savefig("output/node_frequency.pdf", bbox_inches="tight")
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
@@ -124,40 +126,83 @@ sd = samples_static["sigma_theta"].mean()
 def sd_to_entropy(sd):
     return 0.5 * np.log(2 * np.pi * sd * sd) + 0.5
 
+
+# Original violin plots
 ax.violinplot(
     [sd_to_entropy(sd_adaptive), sd_to_entropy(sd_static)], positions=[1, 2],
 )
-ax.plot([-0.125, 0.125], [sd_to_entropy(sd)] * 2, color="black")
-ax.scatter([0], [sd_to_entropy(sd)], color="black", s=5)
 
-# Add mean value text for the first point
-mean_val_0 = sd_to_entropy(sd)
-ax.text(0, mean_val_0 + 0.02, f'{mean_val_0:.2f}', ha='center', va='bottom')
-
-ax.scatter([1], [sd_to_entropy(sd_adaptive).mean()], color="black", s=5)
+# Prior entropy (position 0)
+prior_entropy = sd_to_entropy(sd)
+ax.plot([-0.125, 0.125], [prior_entropy] * 2, color="black")
 ax.plot(
-    [-0.125 + 1, 0.125 + 1], [sd_to_entropy(sd_adaptive).mean()] * 2,
+    [+0.125, ax.get_xlim()[1] - (-0.125 - ax.get_xlim()[0])],
+    [prior_entropy] * 2, color="black", lw=0.5, ls="dashed",
+)
+ax.scatter([0], [prior_entropy], color="black", s=5)
+
+# Add mean value text for the prior
+ax.text(
+    0, prior_entropy + 0.02, f'{prior_entropy:.2f}', ha='center', va='bottom',
+)
+
+# Adaptive posterior (position 1)
+mean_val_adaptive = sd_to_entropy(sd_adaptive).mean()
+ax.scatter([1], [mean_val_adaptive], color="black", s=5)
+ax.plot(
+    [-0.125 + 1, 0.125 + 1], [mean_val_adaptive] * 2,
     color="black",
 )
 
 # Add mean value text for adaptive
-mean_val_adaptive = sd_to_entropy(sd_adaptive).mean()
 ax.text(
     1, mean_val_adaptive + 0.02, f'{mean_val_adaptive:.2f}', ha='center',
     va='bottom',
 )
 
-ax.scatter([2], [sd_to_entropy(sd_static).mean()], color="black", s=5)
+# Static posterior (position 2)
+mean_val_static = sd_to_entropy(sd_static).mean()
+ax.scatter([2], [mean_val_static], color="black", s=5)
 ax.plot(
-    [-0.125 + 2, 0.125 + 2], [sd_to_entropy(sd_static).mean()] * 2,
+    [-0.125 + 2, 0.125 + 2], [mean_val_static] * 2,
     color="black",
 )
 
 # Add mean value text for static
-mean_val_static = sd_to_entropy(sd_static).mean()
 ax.text(
     2, mean_val_static + 0.02, f'{mean_val_static:.2f}', ha='center',
     va='bottom',
+)
+
+# Add arrows showing information gain
+# Arrow from prior to adaptive
+adaptive_info_gain = prior_entropy - mean_val_adaptive
+ax.annotate(
+    '', xy=(0.75, mean_val_adaptive), xytext=(0.75, prior_entropy),
+    arrowprops=dict(arrowstyle='->', lw=0.5),
+)
+
+# Information gain label for adaptive
+ax.text(
+    0.65, (prior_entropy + mean_val_adaptive) / 2,
+    f'IG = {adaptive_info_gain:.2f}',
+    ha='center', va='center', fontsize=8,
+    rotation=90,
+)
+
+# Arrow from prior to static
+static_info_gain = prior_entropy - mean_val_static
+ax.annotate(
+    '', xy=(1.75, mean_val_static), xytext=(1.75, prior_entropy),
+    arrowprops=dict(arrowstyle='->', lw=0.5),
+)
+
+# Information gain label for static
+ax.text(
+    1.65, (prior_entropy + mean_val_static) / 2,
+    f'IG = {static_info_gain:.2f}',
+    ha='center', va='center', fontsize=8,
+    rotation=90,
 )
 
 ax.set_xticks([0, 1, 2], ["No data (prior)", "Adaptive", "Static"])
