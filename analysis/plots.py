@@ -1,6 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
+import scipy
 
 matplotlib.use("pgf")
 plt.rcParams.update(
@@ -65,8 +66,7 @@ ax.grid(True, alpha=0.3)
 
 plt.show()
 
-# Create a figure with subplots for different visualization approaches
-fig, ax = plt.subplots(figsize=(4.8, 3.2))
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 n = adaptive.groupby("participant_id")["id"].count()
 samples_adaptive = np.load("output/irt_samples_adaptive.npz")
@@ -74,8 +74,9 @@ samples_static = np.load("output/irt_samples_static.npz")
 theta_adaptive = samples_adaptive['theta'].mean(axis=0)
 theta_static = samples_static['theta'].mean(axis=0)
 
-# ax.hist(n, bins=np.arange(0, n.max()+1))
-scatter = ax.scatter(theta_static, theta_adaptive, c=n, cmap=plt.cm.Reds)
+difficulty_static = samples_static["d"].mean(axis=0)
+
+scatter = ax.scatter(theta_static, theta_adaptive, c=n, cmap=plt.cm.Blues, s=4)
 ax.set_xlabel(r"Final $E(\theta_i)$ (static)")
 ax.set_ylabel(r"Final $E(\theta_i)$ (adaptive)")
 
@@ -84,7 +85,8 @@ ax.text(
     0.075, 0.95, f"$R^2={r2:.2f}$", transform=ax.transAxes, ha="left", va="top",
 )
 ax.text(
-    0.05, 0.85, f"$\\langle n_i \\rangle={n.mean():.1f}$", transform=ax.transAxes, ha="left", va="top",
+    0.05, 0.85, f"$\\langle n_i \\rangle={n.mean():.1f}$",
+    transform=ax.transAxes, ha="left", va="top",
 )
 
 # Add colorbar with legend
@@ -94,3 +96,72 @@ cbar.set_label(
 )  # 'n' as the colorbar label
 plt.show()
 plt.savefig("output/theta_comparison.pdf", bbox_inches="tight")
+
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+n = adaptive.groupby("node_id")["participant_id"].count()
+n_static = static.groupby("node_id")["participant_id"].count()
+ax.scatter(difficulty_static, n, label="Adaptive")
+ax.scatter(difficulty_static, n_static, label="Static")
+ax2 = ax.twinx()
+sns.kdeplot(
+    x=theta_static, label=r"$\theta_i$ distribution (static)", ax=ax2,
+    hue_norm=(0, 200),
+    bw_adjust=0.8, color='#4daf4a',
+)
+ax.set_xlabel("Challenge difficulty")
+ax.set_ylabel("Number of trials")
+ax.set_ylim(0, None)
+fig.legend(ncol=2, loc='upper center', bbox_to_anchor=(0.5, 1.15))
+plt.savefig("output/node_frequency.pdf", bbox_inches="tight")
+
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+n = adaptive.groupby("participant_id")["id"].count()
+sd_adaptive = samples_adaptive["theta"].std(axis=0)
+sd_static = samples_static["theta"].std(axis=0)
+sd = samples_static["sigma_theta"].mean()
+
+
+def sd_to_entropy(sd):
+    return 0.5 * np.log(2 * np.pi * sd * sd) + 0.5
+
+ax.violinplot(
+    [sd_to_entropy(sd_adaptive), sd_to_entropy(sd_static)], positions=[1, 2],
+)
+ax.plot([-0.125, 0.125], [sd_to_entropy(sd)] * 2, color="black")
+ax.scatter([0], [sd_to_entropy(sd)], color="black", s=5)
+
+# Add mean value text for the first point
+mean_val_0 = sd_to_entropy(sd)
+ax.text(0, mean_val_0 + 0.02, f'{mean_val_0:.2f}', ha='center', va='bottom')
+
+ax.scatter([1], [sd_to_entropy(sd_adaptive).mean()], color="black", s=5)
+ax.plot(
+    [-0.125 + 1, 0.125 + 1], [sd_to_entropy(sd_adaptive).mean()] * 2,
+    color="black",
+)
+
+# Add mean value text for adaptive
+mean_val_adaptive = sd_to_entropy(sd_adaptive).mean()
+ax.text(
+    1, mean_val_adaptive + 0.02, f'{mean_val_adaptive:.2f}', ha='center',
+    va='bottom',
+)
+
+ax.scatter([2], [sd_to_entropy(sd_static).mean()], color="black", s=5)
+ax.plot(
+    [-0.125 + 2, 0.125 + 2], [sd_to_entropy(sd_static).mean()] * 2,
+    color="black",
+)
+
+# Add mean value text for static
+mean_val_static = sd_to_entropy(sd_static).mean()
+ax.text(
+    2, mean_val_static + 0.02, f'{mean_val_static:.2f}', ha='center',
+    va='bottom',
+)
+
+ax.set_xticks([0, 1, 2], ["No data (prior)", "Adaptive", "Static"])
+ax.set_ylabel(r"$H(\theta_i)$ distribution")
+ax.set_ylim(None, 2.0)
+
+plt.savefig("output/entropy.pdf", bbox_inches="tight")

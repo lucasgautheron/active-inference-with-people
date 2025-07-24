@@ -57,16 +57,19 @@ def create_stan_model():
     parameters {
         vector[J] theta;           // ability parameters (participants)
         vector[K] d;            // difficulty parameters (items)
+        real<lower=0> sigma_theta;
     }
 
     model {
         // Priors
-        theta ~ normal(0, 2);                    // standard normal abilities
-        d ~ normal(0, 1);      // difficulty parameters
+        theta ~ normal(0, sigma_theta); // standard normal abilities
+        d ~ normal(0, 1); // difficulty parameters
 
         for (n in 1:N) {
             y[n] ~ bernoulli_logit(theta[jj[n]] - d[kk[n]]);
         }
+        
+        sigma_theta ~ exponential(1);
     }
 
     generated quantities {
