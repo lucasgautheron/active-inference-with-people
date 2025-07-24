@@ -112,7 +112,7 @@ def fit_irt_model(
 
     # Write Stan model to file
     stan_code = create_stan_model()
-    model_file = "irt_model.stan"
+    model_file = "output/irt_model.stan"
     with open(model_file, 'w') as f:
         f.write(stan_code)
 
@@ -136,7 +136,7 @@ def fit_irt_model(
     return fit, stan_data
 
 
-def save_stan_samples(fit, output_file='irt_samples.npz'):
+def save_stan_samples(fit, output_file):
     """Save all Stan samples to npz file"""
 
     # Get all variable names from the fit
