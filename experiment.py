@@ -422,19 +422,6 @@ class AdaptiveLearner:
             "posterior_sd_intercept",
         ).detach().clone()
 
-        np.savez(
-            'posterior_parameters.npz',
-            theta_means=self.posterior_theta_means.numpy(),
-            theta_sds=self.posterior_theta_sds.numpy(),
-            difficulty_means=self.posterior_difficulty_means.numpy(),
-            difficulty_sds=self.posterior_difficulty_sds.numpy(),
-            intercept_mean=self.posterior_intercept_mean.numpy(),
-            intercept_sd=self.posterior_intercept_sd.numpy(),
-            participant_indices=self.participant_indices.numpy(),
-            item_indices=self.item_indices.numpy(),
-            responses=self.responses.numpy(),
-        )
-
 
 class KnowledgeTrial(StaticTrial):
     time_estimate = 10  # how long it should take to complete each trial, in seconds
