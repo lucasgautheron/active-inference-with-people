@@ -77,8 +77,8 @@ theta_static = samples_static['theta'].mean(axis=0)
 difficulty_static = samples_static["d"].mean(axis=0)
 
 scatter = ax.scatter(theta_static, theta_adaptive, c=n, cmap=plt.cm.Blues, s=4)
-ax.set_xlabel(r"Final $E(\theta_i)$ (static)")
-ax.set_ylabel(r"Final $E(\theta_i)$ (adaptive)")
+ax.set_xlabel(r"Posterior $\theta_i$ (static)")
+ax.set_ylabel(r"Posterior $\theta_i$ (adaptive)")
 
 r2 = np.corrcoef(theta_static, theta_adaptive)[0, 1] ** 2
 ax.text(
@@ -120,20 +120,22 @@ fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 n = adaptive.groupby("participant_id")["id"].count()
 sd_adaptive = samples_adaptive["theta"].std(axis=0)
 sd_static = samples_static["theta"].std(axis=0)
-sd = samples_static["sigma_theta"].mean()
+sd = samples_static["sigma_theta"]
 
 
 def sd_to_entropy(sd):
     return 0.5 * np.log(2 * np.pi * sd * sd) + 0.5
 
 
+entropy_adaptive = sd_to_entropy(sd_adaptive)
+entropy_static = sd_to_entropy(sd_static)
+prior_entropy = sd_to_entropy(sd).mean(axis=0)
+
 # Original violin plots
 ax.violinplot(
-    [sd_to_entropy(sd_adaptive), sd_to_entropy(sd_static)], positions=[1, 2],
+    [entropy_adaptive, entropy_static], positions=[1, 2],
 )
-
 # Prior entropy (position 0)
-prior_entropy = sd_to_entropy(sd)
 ax.plot([-0.125, 0.125], [prior_entropy] * 2, color="black")
 ax.plot(
     [+0.125, ax.get_xlim()[1] - (-0.125 - ax.get_xlim()[0])],
@@ -147,7 +149,7 @@ ax.text(
 )
 
 # Adaptive posterior (position 1)
-mean_val_adaptive = sd_to_entropy(sd_adaptive).mean()
+mean_val_adaptive = entropy_adaptive.mean()
 ax.scatter([1], [mean_val_adaptive], color="black", s=5)
 ax.plot(
     [-0.125 + 1, 0.125 + 1], [mean_val_adaptive] * 2,
@@ -161,7 +163,7 @@ ax.text(
 )
 
 # Static posterior (position 2)
-mean_val_static = sd_to_entropy(sd_static).mean()
+mean_val_static = entropy_static.mean()
 ax.scatter([2], [mean_val_static], color="black", s=5)
 ax.plot(
     [-0.125 + 2, 0.125 + 2], [mean_val_static] * 2,
