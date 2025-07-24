@@ -20,7 +20,7 @@ import pyro
 import pyro.distributions as dist
 import numpy as np
 from torch.distributions.constraints import positive
-from pyro.contrib.oed.eig import marginal_eig, posterior_eig, vnmc_eig
+from pyro.contrib.oed.eig import marginal_eig
 from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
 
@@ -157,8 +157,15 @@ class AdaptiveLearner:
                     self.posterior_difficulty_sds[item_idx],
                 ),
             ).unsqueeze(-1)
+            # difficulties = self.posterior_difficulty_means[item_idx].unsqueeze(-1)
 
-            intercept = self.posterior_intercept_mean
+            intercept = pyro.sample(
+                "intercept", dist.Normal(
+                    self.posterior_intercept_mean,
+                    self.posterior_intercept_sd,
+                ),
+            ).unsqueeze(-1)
+            # intercept = self.posterior_intercept_mean
             logit_p = (theta - difficulties) + intercept
 
             y = pyro.sample("y", dist.Bernoulli(logits=logit_p).to_event(1))
@@ -294,13 +301,16 @@ class AdaptiveLearner:
             design_model,
             candidate_designs,
             "y",
-            ["theta", "difficulties"],
-            num_samples=200,
-            num_steps=self.num_steps,
+            ["theta", "difficulties", "intercept"],
+            num_samples=200 * 10,
+            num_steps=self.num_steps * 2,
             guide=self._marginal_guide,
             optim=optimizer,
-            final_num_samples=2000,
+            final_num_samples=2000 * 10,
         )
+
+        p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
+        entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
 
         # Find the item with maximum EIG
         best_idx = torch.argmax(eig)
@@ -337,10 +347,21 @@ class AdaptiveLearner:
                     color=color,
                 )
 
+                plt.scatter(
+                    [
+                        self.posterior_difficulty_means[
+                            item] - self.posterior_intercept_mean,
+                    ],
+                    [entropy[i]],
+                    color="black",
+                )
+                plt.xlim(-3, 3)
+                plt.ylim(0, 1)
+
             plt.savefig("output/test_{}.png".format(participant_id))
             plt.clf()
 
-        return optimal_item, eig.detach().max(), eig
+        return optimal_item, eig.detach().max(), eig, entropy
 
     def administer_response(self, participant_id, item_id, response):
         """Record a participant's response to an item"""
@@ -526,12 +547,12 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                                 candidate.nodes()]
 
         # choose best item
-        next_node_id, eig_value, eig_scores = self.learner.get_optimal_test(
+        next_node_id, eig_value, eig_scores, entropies = self.learner.get_optimal_test(
             pid,
             np.array(candidate_items),
         )
 
-        if eig_value < 0.025:
+        if eig_value < 0.02 and np.max(entropies) < 0.7:
             return []
 
         # recover the retained candidate
