@@ -135,7 +135,7 @@ class AdaptiveLearner:
 
         raise Exception(f"Participant {participant.id} not found")
 
-        def _make_design_model(self, target_participant):
+    def _make_design_model(self, target_participant):
             """Create a model for a specific participant that takes item indices as design"""
 
             def model(design):
