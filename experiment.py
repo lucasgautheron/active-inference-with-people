@@ -403,6 +403,19 @@ class AdaptiveLearner:
             "posterior_sd_intercept",
         ).detach().clone()
 
+        np.savez(
+            'posterior_parameters.npz',
+            theta_means=self.posterior_theta_means.numpy(),
+            theta_sds=self.posterior_theta_sds.numpy(),
+            difficulty_means=self.posterior_difficulty_means.numpy(),
+            difficulty_sds=self.posterior_difficulty_sds.numpy(),
+            intercept_mean=self.posterior_intercept_mean.numpy(),
+            intercept_sd=self.posterior_intercept_sd.numpy(),
+            participant_indices=self.participant_indices.numpy(),
+            item_indices=self.item_indices.numpy(),
+            responses=self.responses.numpy(),
+        )
+
 
 class KnowledgeTrial(StaticTrial):
     time_estimate = 10  # how long it should take to complete each trial, in seconds
@@ -415,6 +428,8 @@ class KnowledgeTrial(StaticTrial):
 
         # Keeps track of whether the participant correctly answered
         self.var.correct = None
+        self.var.ability_mean = None
+        self.var.ability_sd = None
 
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
@@ -544,11 +559,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             pid, trial.node.definition["item_id"],
             trial.var.correct,
         )
+
         self.learner.update_posterior()
 
         mu = self.learner.posterior_theta_means[pid]
         sd = self.learner.posterior_theta_sds[pid]
         logger.info(f"Posterior participant ability: N({mu:.2f}, {sd:.2f})")
+        trial.var.ability_mean = float(mu)
+        trial.var.ability_sd = float(sd)
 
         mu = self.learner.posterior_difficulty_means[
             trial.node.definition["item_id"]]
@@ -565,6 +583,7 @@ class Exp(psynet.experiment.Experiment):
     label = "Adaptive Bayesian testing demo"
     initial_recruitment_size = 1
     test_n_bots = 200
+    test_mode = "serial"
 
     timeline = Timeline(
         MainConsent(),
