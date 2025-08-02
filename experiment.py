@@ -42,32 +42,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger()
 
-
-class Oracle:
-    """
-    Oracle for simulating the experiment
-    using real human data from Dubourg et al., 2025
-    """
-
-    def __init__(self):
-        answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[:, :15]
-        answers = answers[~np.any(pd.isna(answers), axis=1)]
-
-        self.answers = [
-            {
-                "answers": answers[i],
-            }
-            for i in range(len(answers))
-        ]
-
-    def answer(self, participant_id: int, item: int):
-        return self.answers[participant_id]["answers"][item]
-
-
-oracle = Oracle()
-
-
 class AdaptiveLearner:
     """Adaptive Bayesian Learner"""
 
@@ -655,10 +629,7 @@ class KnowledgeTrial(StaticTrial):
             ),
             TextControl(
                 block_copy_paste=True,
-                bot_response=lambda: oracle.answer(
-                    participant.id,
-                    self.definition["item_id"],
-                ),
+                bot_response=lambda: "",
             ),
             time_estimate=self.time_estimate,
         )
@@ -708,7 +679,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     def load_nodes(self):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
-        questions = questions[questions["domain"] == 0]
 
         nodes = [
             StaticNode(
