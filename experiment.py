@@ -312,12 +312,16 @@ class AdaptiveLearner:
             final_num_samples=2000 * 10,
         )
 
-        p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
-        entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
-
         # Find the item with maximum EIG
         best_idx = torch.argmax(eig)
         optimal_item = candidates[best_idx]
+        best_eig = eig.detach().max()
+
+        p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
+        entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+
+        if best_eig < 0.02 and np.max(entropy) < 0.7:
+            optimal_item = None
 
         if DEBUG_MODE:
             x = np.linspace(-3, +3, 200)
@@ -364,7 +368,7 @@ class AdaptiveLearner:
             plt.savefig("output/test_{}.png".format(participant_id))
             plt.clf()
 
-        return optimal_item, eig.detach().max(), eig, entropy
+        return optimal_item
 
     def administer_response(self, participant_id, item_id, response):
         """Record a participant's response to an item"""
@@ -537,12 +541,12 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                                 candidate.nodes()]
 
         # choose best item
-        next_node_id, eig_value, eig_scores, entropies = self.learner.get_optimal_test(
+        next_node_id = self.learner.get_optimal_test(
             pid,
             np.array(candidate_items),
         )
 
-        if eig_value < 0.02 and np.max(entropies) < 0.7:
+        if next_node_id is None:
             return []
 
         # recover the retained candidate
