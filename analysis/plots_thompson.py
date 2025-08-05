@@ -1,9 +1,7 @@
-import pandas as pd
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.cm as cm
-
-import scipy
+import textwrap
 
 matplotlib.use("pgf")
 plt.rcParams.update(
@@ -14,7 +12,7 @@ plt.rcParams.update(
     },
 )
 matplotlib.rcParams["text.latex.preamble"] = (
-    r"\usepackage{amsmath}"
+    r"\usepackage{amsmath}\linespread{1}"
 )
 
 import seaborn as sns
@@ -22,11 +20,6 @@ import seaborn as sns
 import pandas as pd
 import numpy as np
 from scipy.stats import entropy
-import json
-import logging
-
-# Set up logger (adjust as needed for your logging setup)
-logger = logging.getLogger(__name__)
 
 
 def thompson_sampling(df):
@@ -39,7 +32,7 @@ def thompson_sampling(df):
     Returns:
         int: ID of the best node selected by Thompson sampling
     """
-    n_samples = 10000
+    n_samples = 50000
 
     # Convert string boolean values to actual booleans
     df = df.copy()
@@ -180,12 +173,6 @@ fig, axes = plt.subplots(
     figsize=(3.2 * 1.25, 2.13333 * 1.25),
 )
 for i, node_id in enumerate(order):
-    # Get item_id for coloring (assuming it's available in the data)
-    item_id = (
-        full[full["node_id"] == node_id]["item_id"].iloc[0]
-        if len(full[full["node_id"] == node_id]) > 0
-        else None
-    )
     color = cmap(
         mean_reward[node_id]
         / np.max(list(mean_reward.values()))
@@ -218,7 +205,7 @@ axes[2].set_xlabel(r"$E[r_j|\phi_j,\Phi]$")
 axes[0].text(
     0.975,
     0.95,
-    r"{\scriptsize Static design (100\% of trials)}",
+    r"{\scriptsize Greedy design (100\% of trials)}",
     ha="right",
     va="top",
     transform=axes[0].transAxes,
@@ -234,7 +221,7 @@ axes[1].text(
 axes[2].text(
     0.975,
     0.95,
-    r"{\scriptsize Random sampling (67\% of trials)}",
+    r"{\scriptsize Even sampling (67\% of trials)}",
     ha="right",
     va="top",
     transform=axes[2].transAxes,
@@ -245,7 +232,7 @@ cbar = plt.colorbar(
     sm, ax=axes
 )  # Use the ScalarMappable here
 cbar.set_label(
-    r"$E[r_j]_{full}$",
+    r"$E[r_j]_{greedy}$",
     rotation=90,
     labelpad=15,
 )
@@ -315,7 +302,7 @@ def cumulative_frequency(df, output):
         sm, ax=ax
     )  # Use the ScalarMappable here
     cbar.set_label(
-        r"$E[r_j]_{full}$",
+        r"$E[r_j]_{greedy}$",
         rotation=90,
         labelpad=15,
     )
@@ -333,7 +320,6 @@ cumulative_frequency(
 )
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
-
 mean_reward_thompson_10 = {
     node: np.mean(rewards_thompson_10[node])
     for node in rewards_thompson_10.keys()
@@ -360,10 +346,20 @@ ax.scatter(
     ranks_full, ranks_thompson_10, label="Thompson sampling"
 )
 ax.scatter(
-    ranks_full, ranks_random_10, label="Random sampling"
+    ranks_full, ranks_random_10, label="Even sampling"
 )
-ax.set_xlabel("Rank of treatment\nwithout sub-sampling")
-ax.set_ylabel("Estimated rank of treatment")
+ax.set_xlabel("Treatment rank\nin the greedy setup")
+ax.set_ylabel("Estimated treatment rank")
+
+ax.set_xticks(
+    [1, 5, 10, 15],
+    ["1st\n(best)", "5th", "10th", "15th\n(worst)"],
+)
+ax.set_yticks(
+    [1, 5, 10, 15],
+    ["1st\n(best)", "5th", "10th", "15th\n(worst)"],
+)
+
 fig.legend(
     frameon=False,
     bbox_to_anchor=(0.5, 1.05),
@@ -371,3 +367,179 @@ fig.legend(
     ncol=2,
 )
 plt.savefig("output/ranks.pdf", bbox_inches="tight")
+
+
+def plot_y_distributions_by_z(df, mean_reward):
+    """
+    Creates a 5x3 grid of plots showing beta distributions fitted to observed y values
+    for each z condition (0,1) across all 15 node_ids, ordered by mean reward from highest to lowest.
+
+    Args:
+        df (pd.DataFrame): DataFrame containing the trial data with columns
+                          ['node_id', 'y', 'z']
+        mean_reward (dict): Dictionary mapping node_id to mean reward values
+        figsize (tuple): Figure size (width, height)
+
+    Returns:
+        fig, axes: matplotlib figure and axes objects
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    import numpy as np
+    from scipy.stats import beta
+
+    questions = (
+        pd.read_csv("static/questions.csv")
+        .set_index("id")["question"]
+        .to_dict()
+    )
+
+    # Order nodes by mean reward (highest to lowest)
+    ordered_nodes = sorted(
+        mean_reward.keys(),
+        key=lambda node: mean_reward[node],
+        reverse=True,
+    )
+
+    # Create 5x3 subplot grid
+    fig, axes = plt.subplots(
+        3, 5, figsize=(6.4, 4.8), sharex=True, sharey=True
+    )
+    axes = axes.flatten()  # Flatten for easier indexing
+
+    # Convert string boolean values to actual booleans if needed
+    df_clean = df.copy()
+    for col in ["y", "z"]:
+        if col in df_clean.columns:
+            df_clean[col] = df_clean[col].map(
+                {
+                    "True": True,
+                    "False": False,
+                    True: True,
+                    False: False,
+                    1: True,
+                    0: False,
+                }
+            )
+
+    # Plot each node
+    for i, node_id in enumerate(ordered_nodes):
+        ax = axes[i]
+
+        # Filter data for this node
+        node_data = df_clean[df_clean["node_id"] == node_id]
+
+        if len(node_data) == 0:
+            ax.text(
+                0.5,
+                0.5,
+                f"Node {node_id}\n(No data)",
+                ha="center",
+                va="center",
+                transform=ax.transAxes,
+            )
+            continue
+
+        # Separate data by z value
+        z0_data = node_data[node_data["z"] == False]
+        z1_data = node_data[node_data["z"] == True]
+
+        # Create x values for plotting beta distributions
+        x = np.linspace(0, 1, 100)
+
+        # Plot beta distribution for z=0
+        if len(z0_data) > 0:
+            successes_z0 = z0_data[
+                "y"
+            ].sum()  # Count of True values
+            failures_z0 = (
+                len(z0_data) - successes_z0
+            )  # Count of False values
+            alpha_z0 = (
+                successes_z0 + 1
+            )  # Beta prior with alpha=1, beta=1
+            beta_z0 = failures_z0 + 1
+
+            y_z0 = beta.pdf(x, alpha_z0, beta_z0)
+            ax.plot(
+                x,
+                y_z0,
+                color="#377eb8",
+                linewidth=2,
+                label=(
+                    "High-scool or less ($z=0$)"
+                    if i == 0
+                    else None
+                ),
+            )
+            ax.fill_between(
+                x, y_z0, alpha=0.3, color="#377eb8"
+            )
+
+        # Plot beta distribution for z=1
+        if len(z1_data) > 0:
+            successes_z1 = z1_data[
+                "y"
+            ].sum()  # Count of True values
+            failures_z1 = (
+                len(z1_data) - successes_z1
+            )  # Count of False values
+            alpha_z1 = (
+                successes_z1 + 1
+            )  # Beta prior with alpha=1, beta=1
+            beta_z1 = failures_z1 + 1
+
+            y_z1 = beta.pdf(x, alpha_z1, beta_z1)
+            ax.plot(
+                x,
+                y_z1,
+                color="#ff7f00",
+                linewidth=2,
+                label=(
+                    "College ($z=1$)" if i == 0 else None
+                ),
+            )
+            ax.fill_between(
+                x, y_z1, alpha=0.3, color="#ff7f00"
+            )
+
+        # Customize subplot
+        ax.set_title(
+            f"$E[r_j]={mean_reward[node_id]:.2f}$",
+        )
+        question = "\n\\tiny ".join(
+            textwrap.wrap(questions[node_id - 1], 20)
+        )
+        ax.text(
+            0.025,
+            0.975,
+            f"\\tiny ``{question}''",
+            transform=ax.transAxes,
+            ha="left",
+            va="top",
+            linespacing=1
+        )
+        ax.set_ylim(0, 50)
+        ax.set_xlim(0, 1)
+
+    fig.legend(
+        loc="upper right",
+        fontsize=8,
+        ncol=2,
+        frameon=False,
+        bbox_to_anchor=(1, 1.1),
+    )
+
+    plt.tight_layout()
+    plt.subplots_adjust(
+        top=0.985, bottom=0.015, left=0.015, right=0.985
+    )
+
+    plt.savefig(
+        "output/posteriors.pdf", bbox_inches="tight"
+    )
+
+    return fig, axes
+
+
+plot_y_distributions_by_z(full, mean_reward)

@@ -56,7 +56,8 @@ class Oracle:
             "static/education.csv"
         )["college"].values[mask]
 
-        logger.info(self.education)
+        logger.info("Oracle data:")
+        logger.info(answers.shape)
 
     def answer(self, participant_id: int, item: int):
         return self.answers[participant_id]["answers"][item]
@@ -138,10 +139,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             id_="knowledge",
             # number questions administered
             # to each participant (estimate)
-            expected_trials_per_participant=5,
+            expected_trials_per_participant=10,
             # number of questions administered
             # to each participant (maximum)
-            max_trials_per_participant=5,
+            max_trials_per_participant=10,
             # can the same question be shown multiple times?
             allow_repeated_nodes=False,
             # the class of the trials delivered
@@ -178,6 +179,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return nodes
 
     def thompson_sampling(self, nodes):
+        # Thompson sampling requires only one sample,
+        # but for validation purposes,
+        # we might want to visualize the posterior distribution
         n_samples = 1000
 
         # Draw Phi
@@ -333,7 +337,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 class Exp(psynet.experiment.Experiment):
     label = "Adaptive Bayesian testing demo"
     initial_recruitment_size = 1
-    test_n_bots = 200
+    test_n_bots = 300
     test_mode = "serial"
 
     timeline = Timeline(
