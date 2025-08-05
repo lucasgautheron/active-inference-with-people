@@ -136,12 +136,16 @@ full = pd.read_csv(
 thompson_10 = pd.read_csv(
     "output/KnowledgeTrial_thompson_10.csv"
 )
+random_10 = pd.read_csv(
+    "output/KnowledgeTrial_thompson_10_random.csv"
+)
 thompson_5 = pd.read_csv(
     "output/KnowledgeTrial_thompson_5.csv"
 )
 
 rewards_full = thompson_sampling(full)
 rewards_thompson_10 = thompson_sampling(thompson_10)
+rewards_random_10 = thompson_sampling(random_10)
 rewards_thompson_5 = thompson_sampling(thompson_5)
 
 mean_reward = {
@@ -199,7 +203,7 @@ for i, node_id in enumerate(order):
         label=f"Node {node_id}",
     )
     sns.kdeplot(
-        rewards_thompson_5[node_id],
+        rewards_random_10[node_id],
         ax=axes[2],
         color=color,
         label=f"Node {node_id}",
@@ -230,7 +234,7 @@ axes[1].text(
 axes[2].text(
     0.975,
     0.95,
-    r"{\scriptsize Thompson sampling (33\% of trials)}",
+    r"{\scriptsize Random sampling (67\% of trials)}",
     ha="right",
     va="top",
     transform=axes[2].transAxes,
@@ -270,76 +274,100 @@ ax.set_xlabel("$E[r_j]$ (Expected reward for $j$)")
 ax.set_ylabel("Number of trials $n_j$")
 plt.show()
 
-unique_nodes = sorted(thompson_10["node_id"].unique())
 
-# Initialize counters
-counts = {node: 0 for node in unique_nodes}
-cumulative_data = {node: [] for node in unique_nodes}
+def cumulative_frequency(df, output):
+    unique_nodes = sorted(df["node_id"].unique())
 
-# Calculate cumulative counts for each row
-for _, row in thompson_10.iterrows():
-    counts[row["node_id"]] += 1
+    # Initialize counters
+    counts = {node: 0 for node in unique_nodes}
+    cumulative_data = {node: [] for node in unique_nodes}
 
-    # Record current count for all nodes
+    # Calculate cumulative counts for each row
+    for _, row in df.iterrows():
+        counts[row["node_id"]] += 1
+
+        # Record current count for all nodes
+        for node in unique_nodes:
+            cumulative_data[node].append(counts[node])
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+
+    # Create a ScalarMappable for the colorbar
+    norm = plt.Normalize(
+        vmin=0, vmax=np.max(list(mean_reward.values()))
+    )
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])  # Required for ScalarMappable
+
     for node in unique_nodes:
-        cumulative_data[node].append(counts[node])
+        color = cmap(
+            mean_reward[node]
+            / np.max(list(mean_reward.values()))
+        )
+        ax.plot(cumulative_data[node], color=color)
 
-# Plot
+    ax.set_xlabel("Step $t$")
+    ax.set_ylabel(
+        "Cumulative frequency\nof treatment $j$\nat step $t$"
+    )
+    cbar = plt.colorbar(
+        sm, ax=ax
+    )  # Use the ScalarMappable here
+    cbar.set_label(
+        r"$E[r_j]_{full}$",
+        rotation=90,
+        labelpad=15,
+    )
+    fig.savefig(
+        output,
+        bbox_inches="tight",
+    )
+
+
+cumulative_frequency(
+    thompson_10, "output/cumulative_node_frequency.pdf"
+)
+cumulative_frequency(
+    random_10, "output/cumulative_node_frequency_random.pdf"
+)
+
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
-# Create a ScalarMappable for the colorbar
-norm = plt.Normalize(
-    vmin=0, vmax=np.max(list(mean_reward.values()))
+mean_reward_thompson_10 = {
+    node: np.mean(rewards_thompson_10[node])
+    for node in rewards_thompson_10.keys()
+}
+mean_reward_random_10 = {
+    node: np.mean(rewards_random_10[node])
+    for node in rewards_random_10.keys()
+}
+
+nodes = rewards_full.keys()
+
+
+def get_rank(r, nodes):
+    v = np.array(list(r.values()))
+    return [np.sum([r[node] <= v]) for node in nodes]
+
+
+ranks_full = get_rank(mean_reward, nodes)
+ranks_thompson_10 = get_rank(mean_reward_thompson_10, nodes)
+ranks_random_10 = get_rank(mean_reward_random_10, nodes)
+
+ax.plot([1, 15], [1, 15], color="black", zorder=0)
+ax.scatter(
+    ranks_full, ranks_thompson_10, label="Thompson sampling"
 )
-sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-sm.set_array([])  # Required for ScalarMappable
-
-for node in unique_nodes:
-    color = cmap(
-        mean_reward[node]
-        / np.max(list(mean_reward.values()))
-    )
-    ax.plot(cumulative_data[node], color=color)
-
-ax.set_xlabel("Step $t$")
-ax.set_ylabel(
-    "Cumulative frequency\nof treatment $j$\nat step $t$"
+ax.scatter(
+    ranks_full, ranks_random_10, label="Random sampling"
 )
-cbar = plt.colorbar(
-    sm, ax=ax
-)  # Use the ScalarMappable here
-cbar.set_label(
-    r"$E[r_j]_{full}$",
-    rotation=90,
-    labelpad=15,
+ax.set_xlabel("Rank of treatment\nwithout sub-sampling")
+ax.set_ylabel("Estimated rank of treatment")
+fig.legend(
+    frameon=False,
+    bbox_to_anchor=(0.5, 1.05),
+    loc="upper center",
+    ncol=2,
 )
-fig.savefig(
-    "output/cumulative_node_frequency.pdf",
-    bbox_inches="tight",
-)
-
-counts = {node: 0 for node in unique_nodes}
-cumulative_data = {node: [] for node in unique_nodes}
-
-# Calculate cumulative counts for each row
-for _, row in thompson_5.iterrows():
-    counts[row["node_id"]] += 1
-
-    # Record current count for all nodes
-    for node in unique_nodes:
-        cumulative_data[node].append(counts[node])
-
-# Plot
-fig, ax = plt.subplots()
-for node in unique_nodes:
-    color = cmap(
-        mean_reward[node]
-        / np.max(list(mean_reward.values()))
-    )
-    ax.plot(cumulative_data[node], color=color)
-
-ax.set_xlabel("Step $t$")
-ax.set_ylabel(
-    "Cumulative frequency of each treatment $j$ at step $t$"
-)
-plt.show()
+plt.savefig("output/ranks.pdf", bbox_inches="tight")
