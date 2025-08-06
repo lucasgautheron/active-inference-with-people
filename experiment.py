@@ -21,7 +21,7 @@ from psynet.demography.general import (
 import numpy as np
 from pyro.optim import Adam
 
-from scipy.stats import entropy
+from scipy.stats import beta as beta_dist
 
 import pandas as pd
 
@@ -178,7 +178,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return nodes
 
-    def thompson_sampling(self, nodes):
+    def thompson_sampling(self, nodes, z_i: int):
         # Thompson sampling requires only one sample,
         # but for validation purposes,
         # we might want to visualize the posterior distribution
@@ -197,11 +197,12 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             elif participant.var.z == False:
                 beta += 1
 
-        Phi = np.random.beta(alpha, beta, n_samples)
-        # if DEBUG_MODE:
-        #     Phi = np.ones(n_samples) * 0.14
-
         rewards = dict()
+        eig = dict()
+        utility = dict()
+
+        alphas = dict()
+        betas = dict()
         for node in nodes:
             alpha = np.ones(2)
             beta = np.ones(2)
@@ -215,38 +216,44 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 elif trial.var.y == False:
                     beta[z] += 1
 
+            alphas[node.id] = alpha
+            betas[node.id] = beta
+
+            alpha = alpha[:, np.newaxis]
+            beta = beta[:, np.newaxis]
+
             phi = np.random.beta(
-                alpha[:, np.newaxis],
-                beta[:, np.newaxis],
+                alpha,
+                beta,
                 (2, n_samples),
             )
 
-            rewards[node.id] = entropy(
-                [Phi, 1 - Phi], axis=0, base=2
+            y = np.random.binomial(
+                np.ones((2, n_samples), dtype=int),
+                phi,
+                size=(
+                    2,
+                    n_samples,
+                ),
             )
 
-            for z in [False, True]:
-                p_z = Phi if z else 1 - Phi
-                for y in [False, True]:
-                    p_y_given_z = (
-                        phi[z * 1] if y else 1 - phi[z * 1]
-                    )
-                    p_y = (
-                        phi[1] * Phi + phi[0] * (1 - Phi)
-                        if y
-                        else (
-                            (1 - phi[1]) * Phi
-                            + (1 - phi[0]) * (1 - Phi)
-                        )
-                    )
+            p_y_given_phi = phi * y + (1 - phi) * (1 - y)
+            p_y = alpha / (alpha + beta) * y + beta / (
+                alpha + beta
+            ) * (1 - y)
 
-                    rewards[node.id] += (
-                        p_y_given_z
-                        * p_z
-                        * np.log2(p_y_given_z * p_z / p_y)
-                    )
+            logger.info(p_y_given_phi)
+            logger.info(p_y)
 
-            assert (rewards[node.id] > -1e-6).all()
+            EIG = np.mean(
+                np.log(p_y_given_phi[z_i] / p_y[z_i])
+            )
+
+            U = 0.5 * np.abs(np.mean(y[1]) - np.mean(y[0]))
+
+            rewards[node.id] = EIG + U
+            eig[node.id] = EIG
+            utility[node.id] = U
 
         from matplotlib import pyplot as plt
         import seaborn as sns
@@ -256,16 +263,35 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             fig, ax = plt.subplots()
             for node in nodes:
                 color = cmap(node.definition["item_id"])
-                sns.kdeplot(
-                    rewards[node.id], ax=ax, color=color
+                logger.info(rewards[node.id])
+                x = np.linspace(0, 1, 100)
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node.id][0],
+                        b=betas[node.id][0],
+                    ),
+                    color=color,
                 )
-            ax.set_xlim(0, entropy([Phi[0], 1 - Phi[0]]))
-            ax.set_ylim(0, 60)
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node.id][1],
+                        b=betas[node.id][1],
+                    ),
+                    color=color,
+                    ls="dashed",
+                )
+
+            # ax.set_xlim(0, entropy([Phi[0], 1 - Phi[0]]))
+            # ax.set_ylim(0, 60)
             plt.show()
 
         best_node = sorted(
             list(rewards.keys()),
-            key=lambda node: rewards[node][0],
+            key=lambda node: rewards[node],
             reverse=True,
         )[0]
 
@@ -285,7 +311,26 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         for candidate in candidates:
             nodes += candidate.nodes()
 
-        next_node_id = self.thompson_sampling(nodes)
+        response = Response.query.filter_by(
+            question="formal_education",
+            participant_id=participant.id,
+        ).one()
+
+        if DEBUG_MODE:
+            z = 1 if oracle.college(participant.id) else 0
+        else:
+            z = (
+                1
+                if response.answer
+                in [
+                    "college",
+                    "graduate_school",
+                    "postgraduate_degree_or_higher",
+                ]
+                else 0
+            )
+
+        next_node_id = self.thompson_sampling(nodes, z)
 
         for candidate in candidates:
             if any(
@@ -337,7 +382,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 class Exp(psynet.experiment.Experiment):
     label = "Adaptive Bayesian testing demo"
     initial_recruitment_size = 1
-    test_n_bots = 300
+    test_n_bots = 200
     test_mode = "serial"
 
     timeline = Timeline(
