@@ -403,7 +403,7 @@ def plot_y_distributions_by_z(df, mean_reward):
 
     # Create 5x3 subplot grid
     fig, axes = plt.subplots(
-        3, 5, figsize=(6.4, 4.8), sharex=True, sharey=True
+        3, 5, figsize=(6.4*1.125, 4.8*1.125), sharex=True, sharey=True
     )
     axes = axes.flatten()  # Flatten for easier indexing
 
@@ -507,33 +507,42 @@ def plot_y_distributions_by_z(df, mean_reward):
         ax.set_title(
             f"$E[r_j]={mean_reward[node_id]:.2f}$",
         )
-        question = "\n\\tiny ".join(
-            textwrap.wrap(questions[node_id - 1], 20)
+        question = "\n\\scriptsize ".join(
+            textwrap.wrap(questions[node_id - 1], 22)
         )
         ax.text(
-            0.025,
+            0.0333,
             0.975,
-            f"\\tiny ``{question}''",
+            f"\\scriptsize ``{question}''",
             transform=ax.transAxes,
             ha="left",
             va="top",
-            linespacing=1
+            linespacing=1,
         )
         ax.set_ylim(0, 50)
         ax.set_xlim(0, 1)
+
+        if i % 5 == 0:
+            ax.tick_params(labelleft=True)
+        else:
+            ax.tick_params(labelleft=False)
+
+        if i // 5 == 2:
+            ax.tick_params(labelbottom=True)
+            ax.set_xticks([0.25, 0.5, 0.75])
+        else:
+            ax.tick_params(labelbottom=False)
 
     fig.legend(
         loc="upper right",
         fontsize=8,
         ncol=2,
         frameon=False,
-        bbox_to_anchor=(1, 1.1),
+        bbox_to_anchor=(1, 1.05),
     )
 
     plt.tight_layout()
-    plt.subplots_adjust(
-        top=0.985, bottom=0.015, left=0.015, right=0.985
-    )
+    plt.subplots_adjust(wspace=0.05, hspace=0.25)
 
     plt.savefig(
         "output/posteriors.pdf", bbox_inches="tight"
