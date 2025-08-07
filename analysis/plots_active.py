@@ -119,7 +119,7 @@ def expected_free_energy(df):
         p_y = p_y[z, np.arange(n_samples)]
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
-        U = np.mean(y[1]) - np.mean(y[0])
+        U = np.mean(y[1]-(1-y[1]) + (1-y[0])-y[0])
 
         rewards[node_id] = EIG + U
         eig[node_id] = EIG

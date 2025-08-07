@@ -248,7 +248,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 np.log(p_y_given_phi[z_i] / p_y[z_i])
             )
 
-            U = 0.1 * (np.mean(y[1]) - np.mean(y[0]))
+            U = 0.1 * (2*np.mean(y[1]) - 2*np.mean(y[0]))
 
             rewards[node.id] = EIG + U
             eig[node.id] = EIG
