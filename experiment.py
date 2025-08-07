@@ -24,6 +24,8 @@ from pyro.optim import Adam
 from scipy.stats import beta as beta_dist
 
 import pandas as pd
+import csv
+
 
 DEBUG_MODE = True
 
@@ -178,10 +180,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return nodes
 
-    def thompson_sampling(self, nodes, z_i: int):
-        # Thompson sampling requires only one sample,
-        # but for validation purposes,
-        # we might want to visualize the posterior distribution
+    def get_optimal_treatment(self, nodes, z_i: int):
         n_samples = 1000
 
         # Draw Phi
@@ -249,21 +248,20 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 np.log(p_y_given_phi[z_i] / p_y[z_i])
             )
 
-            U = 0.5 * np.abs(np.mean(y[1]) - np.mean(y[0]))
+            U = 0.1 * (np.mean(y[1]) - np.mean(y[0]))
 
             rewards[node.id] = EIG + U
             eig[node.id] = EIG
             utility[node.id] = U
 
         from matplotlib import pyplot as plt
-        import seaborn as sns
 
         if np.random.uniform() > 1:
             cmap = plt.get_cmap("tab10")
             fig, ax = plt.subplots()
             for node in nodes:
-                color = cmap(node.definition["item_id"])
-                logger.info(rewards[node.id])
+                color = cmap(node.id % 10)
+                logger.info(utility[node.id])
                 x = np.linspace(0, 1, 100)
                 ax.plot(
                     x,
@@ -294,6 +292,19 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             key=lambda node: rewards[node],
             reverse=True,
         )[0]
+
+        if len(nodes) == 15:
+            with open(
+                "output/utility.csv", "a", newline=""
+            ) as file:
+                writer = csv.writer(file)
+                writer.writerow(
+                    [
+                        rewards[best_node],
+                        eig[best_node],
+                        utility[best_node],
+                    ]
+                )
 
         for node in nodes:
             if node.id == best_node:
@@ -330,7 +341,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 else 0
             )
 
-        next_node_id = self.thompson_sampling(nodes, z)
+        next_node_id = self.get_optimal_treatment(nodes, z)
 
         for candidate in candidates:
             if any(

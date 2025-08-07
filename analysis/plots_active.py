@@ -23,15 +23,15 @@ import numpy as np
 
 def expected_free_energy(df):
     """
-    Thompson sampling function adapted for pandas DataFrame input.
+    Active inference function adapted for pandas DataFrame input.
 
     Args:
         df (pd.DataFrame): DataFrame containing trial data
 
     Returns:
-        int: ID of the best node selected by Thompson sampling
+        int: ID of the best node selected by Active inference
     """
-    n_samples = 50000
+    n_samples = 100000
 
     # Convert string boolean values to actual booleans
     df = df.copy()
@@ -119,7 +119,7 @@ def expected_free_energy(df):
         p_y = p_y[z, np.arange(n_samples)]
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
-        U = np.mean(y[1]-y[0])
+        U = np.mean(y[1]) - np.mean(y[0])
 
         rewards[node_id] = EIG + U
         eig[node_id] = EIG
@@ -156,7 +156,7 @@ rewards_active_10, eig_active_10, utility_active_10 = (
     expected_free_energy(active_10)
 )
 rewards_random_10, eig_random_10, utility_random_10 = (
-    expected_free_energy(active_10)
+    expected_free_energy(random_10)
 )
 
 mean_reward = {
@@ -277,9 +277,14 @@ ranks_full = get_rank(mean_reward, nodes)
 ranks_active_10 = get_rank(mean_reward_active_10, nodes)
 ranks_random_10 = get_rank(mean_reward_random_10, nodes)
 
+print("Active:")
+print(mean_reward_active_10)
+print("Random:")
+print(mean_reward_random_10)
+
 ax.plot([1, 15], [1, 15], color="black", zorder=0)
 ax.scatter(
-    ranks_full, ranks_active_10, label="Thompson sampling"
+    ranks_full, ranks_active_10, label="Active inference"
 )
 ax.scatter(
     ranks_full, ranks_random_10, label="Even sampling"
