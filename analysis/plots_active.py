@@ -12,7 +12,7 @@ plt.rcParams.update(
     },
 )
 matplotlib.rcParams["text.latex.preamble"] = (
-    r"\usepackage{amsmath}\linespread{1}"
+    r"\usepackage{amsmath}\usepackage{amssymb}\linespread{1}"
 )
 
 import seaborn as sns
@@ -119,7 +119,7 @@ def expected_free_energy(df):
         p_y = p_y[z, np.arange(n_samples)]
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
-        U = np.mean(y[1]-(1-y[1]) + (1-y[0])-y[0])
+        U = np.mean(y[1] - (1 - y[1]) + (1 - y[0]) - y[0])
 
         rewards[node_id] = EIG + U
         eig[node_id] = EIG
@@ -287,8 +287,14 @@ ax.scatter(
     ranks_full, ranks_active_10, label="Active inference"
 )
 ax.scatter(
-    ranks_full, ranks_random_10, label="Even sampling"
+    ranks_full, ranks_random_10, label="Even sampling", s=4
 )
+# ax.scatter(
+#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_active_10[node] for node in mean_reward.keys()], label="Active inference"
+# )
+# ax.scatter(
+#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_random_10[node] for node in mean_reward.keys()], label="Even sampling", s=4
+# )
 ax.set_xlabel("Treatment rank\nin the greedy setup")
 ax.set_ylabel("Estimated treatment rank")
 
@@ -497,3 +503,35 @@ def plot_y_distributions_by_z(df, mean_reward):
 
 
 plot_y_distributions_by_z(active_10, mean_reward_active_10)
+
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+
+df = pd.read_csv("output/utility.csv")
+df.columns = ["efe", "eig", "r"]
+
+ax.fill_between(
+    np.arange(len(df)),
+    np.zeros(len(df)),
+    df["r"] / df["efe"],
+    alpha=0.5,
+    label="$E[r_{\hat{j}}]/G_{\hat{j}}$\n(exploitation)",
+)
+ax.fill_between(
+    np.arange(len(df)),
+    df["r"] / df["efe"],
+    np.ones(len(df)),
+    alpha=0.5,
+    label="$EIG(\hat{j})/G_{\hat{j}}$\n(exploration)",
+)
+
+ax.set_xlabel("Step $t$")
+ax.set_ylabel("Contributions to $G_{\hat{j}}$")
+
+fig.legend(
+    loc="upper center",
+    bbox_to_anchor=(0.5, 1.125),
+    ncol=2,
+    frameon=False,
+)
+
+fig.savefig("output/efe.pdf", bbox_inches="tight")
