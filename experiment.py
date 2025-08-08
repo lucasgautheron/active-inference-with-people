@@ -7,7 +7,7 @@ from markupsafe import Markup
 import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import Timeline, Response
+from psynet.timeline import Timeline, Response, CodeBlock
 from psynet.trial.static import (
     StaticNode,
     StaticTrial,
@@ -183,19 +183,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     def get_optimal_treatment(self, nodes, z_i: int):
         n_samples = 1000
 
-        # Draw Phi
-        alpha, beta = 1, 1
-
-        participants = KnowledgeTrial.query.distinct(
-            KnowledgeTrial.participant_id
-        ).all()
-
-        for participant in participants:
-            if participant.var.z == True:
-                alpha += 1
-            elif participant.var.z == False:
-                beta += 1
-
         rewards = dict()
         eig = dict()
         utility = dict()
@@ -206,10 +193,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             alpha = np.ones(2)
             beta = np.ones(2)
             for trial in node.viable_trials:
-                if trial.var.z is None:
-                    continue
-
-                z = 1 if trial.var.z else 0
+                z = 1 if trial.participant.var.z else 0
                 if trial.var.y == True:
                     alpha[z] += 1
                 elif trial.var.y == False:
@@ -248,7 +232,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 np.log(p_y_given_phi[z_i] / p_y[z_i])
             )
 
-            U = 0.1 * (2*np.mean(y[1]) - 2*np.mean(y[0]))
+            U = 0.1 * (
+                2 * np.mean(y[1]) - 2 * np.mean(y[0])
+            )
 
             rewards[node.id] = EIG + U
             eig[node.id] = EIG
@@ -318,28 +304,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         participant,
     ):
 
-        nodes = []
-        for candidate in candidates:
-            nodes += candidate.nodes()
+        nodes = [network.head for network in candidates]
 
-        response = Response.query.filter_by(
-            question="formal_education",
-            participant_id=participant.id,
-        ).one()
-
-        if DEBUG_MODE:
-            z = 1 if oracle.college(participant.id) else 0
-        else:
-            z = (
-                1
-                if response.answer
-                in [
-                    "college",
-                    "graduate_school",
-                    "postgraduate_degree_or_higher",
-                ]
-                else 0
-            )
+        z = participant.var.z
 
         next_node_id = self.get_optimal_treatment(nodes, z)
 
@@ -371,17 +338,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             participant_id=participant.id,
         ).one()
 
-        if DEBUG_MODE:
-            trial.var.z = bool(
-                oracle.college(participant.id)
-            )
-        else:
-            trial.var.z = response.answer in [
-                "college",
-                "graduate_school",
-                "postgraduate_degree_or_higher",
-            ]
-
         super().finalize_trial(
             answer,
             trial,
@@ -399,6 +355,23 @@ class Exp(psynet.experiment.Experiment):
     timeline = Timeline(
         MainConsent(),
         FormalEducation(),
+        CodeBlock(
+            lambda participant: participant.var.set(
+                "z",
+                (
+                    oracle.college(participant.id)
+                    if DEBUG_MODE
+                    else (
+                        participant.answer
+                        in [
+                            "college",
+                            "graduate_school",
+                            "postgraduate_degree_or_higher",
+                        ]
+                    )
+                ),
+            )
+        ),
         KnowledgeTrialMaker(),
         SuccessfulEndPage(),
     )
