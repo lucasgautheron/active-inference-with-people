@@ -159,8 +159,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             nodes=nodes,
         )
 
-        logger.info("Initializing adaptive learner.")
-
     def load_nodes(self):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
@@ -236,15 +234,21 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 alpha + beta
             ) * (1 - y)
 
-            logger.info(p_y_given_phi)
-            logger.info(p_y)
-
             EIG = np.mean(
                 np.log(p_y_given_phi[z_i] / p_y[z_i])
             )
 
-            U = 0.1 * (
-                2 * np.mean(y[1]) - 2 * np.mean(y[0])
+            # U = 0.1 * (
+            #     2 * np.mean(y[1]) - 2 * np.mean(y[0])
+            # )
+            epsilon = 0.1
+            U = np.mean(
+                np.log(
+                    y[1] * (1 - epsilon)
+                    + (1 - y[1]) * epsilon
+                    + y[0] * epsilon
+                    + (1 - y[0]) * (1 - epsilon)
+                )
             )
 
             rewards[network_id] = EIG + U
@@ -354,7 +358,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             in trial.node.definition["answers"]
         )
 
-        trial.var.z = trial.participant.var.z
+        trial.var.z = bool(trial.participant.var.z)
 
         super().finalize_trial(
             answer,
