@@ -186,7 +186,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     ):
         z_i = participant.var.z
 
-        n_samples = 1000
+        n_samples = 10000
 
         rewards = dict()
         eig = dict()
@@ -241,7 +241,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             # U = 0.1 * (
             #     2 * np.mean(y[1]) - 2 * np.mean(y[0])
             # )
-            epsilon = np.random.beta(1, 2, n_samples)
+            epsilon = 0.05
             U = np.mean(
                 np.log(
                     y[1] * (1 - epsilon)
@@ -259,7 +259,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         from matplotlib import pyplot as plt
 
-        if np.random.uniform() > 1:
+        if (
+            np.random.uniform() > 1
+            and len(networks_ids) == 15
+        ):
             cmap = plt.get_cmap("tab10")
             fig, ax = plt.subplots()
             for network_id in networks_ids:
@@ -274,6 +277,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                         b=betas[network_id][0],
                     ),
                     color=color,
+                    label=rewards[network_id],
                 )
                 ax.plot(
                     x,
@@ -285,7 +289,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     color=color,
                     ls="dashed",
                 )
-
+            plt.legend()
             plt.show()
 
         best_network = sorted(
@@ -325,7 +329,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 data[network.id].append(
                     {
                         "y": y,
-                        "z": participant.var.z,
+                        "z": trial.participant.var.z,
                         "participant_id": participant.id,
                         "trial_id": trial.id,
                     }
