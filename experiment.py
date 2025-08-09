@@ -22,6 +22,7 @@ import numpy as np
 from pyro.optim import Adam
 
 from scipy.stats import beta as beta_dist
+from scipy.special import softmax
 
 import pandas as pd
 import csv
@@ -94,7 +95,7 @@ class KnowledgeTrial(StaticTrial):
         )
 
         self.var.y = None  # correct answer
-        self.var.z = None  # education-level
+        self.var.z = None  # participant education-level
 
     def get_y(self):
         return self.var.y
@@ -238,19 +239,20 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 np.log(p_y_given_phi[z_i] / p_y[z_i])
             )
 
-            # U = 0.1 * (
-            #     2 * np.mean(y[1]) - 2 * np.mean(y[0])
+            # epsilon = 0.001
+            # U = np.mean(
+            #     np.log(
+            #         y[1] * (1 - epsilon)
+            #         + (1 - y[1]) * epsilon
+            #     )
+            #     + np.log(
+            #         y[0] * epsilon
+            #         + (1 - y[0]) * (1 - epsilon)
+            #     )
             # )
-            epsilon = 0.05
-            U = np.mean(
-                np.log(
-                    y[1] * (1 - epsilon)
-                    + (1 - y[1]) * epsilon
-                )
-                + np.log(
-                    y[0] * epsilon
-                    + (1 - y[0]) * (1 - epsilon)
-                )
+            gamma = 0.1
+            U = gamma * np.mean(
+                y[1] - (1 - y[1]) - y[0] + (1 - y[0])
             )
 
             rewards[network_id] = EIG + U
@@ -298,6 +300,15 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             reverse=True,
         )[0]
 
+        # reward_values = np.array(list(rewards.values()))
+        # gamma = 10
+        # softmax_probs = softmax(gamma * reward_values)
+        #
+        # network_ids = list(rewards.keys())
+        # best_network = np.random.choice(
+        #     network_ids, p=softmax_probs
+        # )
+
         if len(networks_ids) == 15:
             with open(
                 "output/utility.csv", "a", newline=""
@@ -308,6 +319,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                         rewards[best_network],
                         eig[best_network],
                         utility[best_network],
+                        softmax_probs[
+                            network_ids.index(best_network)
+                        ],
                     ]
                 )
 
