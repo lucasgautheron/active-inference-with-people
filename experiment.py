@@ -93,8 +93,11 @@ class KnowledgeTrial(StaticTrial):
             **kwargs,
         )
 
-        self.var.y = None  # correct answer?
-        self.var.z = None  # education?
+        self.var.y = None  # correct answer
+        self.var.z = None  # education-level
+
+    def get_y(self):
+        return self.var.y
 
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
@@ -180,7 +183,11 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return nodes
 
-    def get_optimal_treatment(self, nodes, z_i: int):
+    def get_optimal_treatment(
+        self, networks_ids, participant, data
+    ):
+        z_i = participant.var.z
+
         n_samples = 1000
 
         rewards = dict()
@@ -189,18 +196,22 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         alphas = dict()
         betas = dict()
-        for node in nodes:
+
+        for network_id in networks_ids:
             alpha = np.ones(2)
             beta = np.ones(2)
-            for trial in node.viable_trials:
-                z = 1 if trial.participant.var.z else 0
-                if trial.var.y == True:
+
+            for trial in data[network_id]:
+                y = trial["y"]
+                z = trial["z"]
+
+                if y == True:
                     alpha[z] += 1
-                elif trial.var.y == False:
+                elif y == False:
                     beta[z] += 1
 
-            alphas[node.id] = alpha
-            betas[node.id] = beta
+            alphas[network_id] = alpha
+            betas[network_id] = beta
 
             alpha = alpha[:, np.newaxis]
             beta = beta[:, np.newaxis]
@@ -236,25 +247,25 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 2 * np.mean(y[1]) - 2 * np.mean(y[0])
             )
 
-            rewards[node.id] = EIG + U
-            eig[node.id] = EIG
-            utility[node.id] = U
+            rewards[network_id] = EIG + U
+            eig[network_id] = EIG
+            utility[network_id] = U
 
         from matplotlib import pyplot as plt
 
         if np.random.uniform() > 1:
             cmap = plt.get_cmap("tab10")
             fig, ax = plt.subplots()
-            for node in nodes:
-                color = cmap(node.id % 10)
-                logger.info(utility[node.id])
+            for network_id in networks_ids:
+                color = cmap(network_id % 10)
+                logger.info(utility[network_id])
                 x = np.linspace(0, 1, 100)
                 ax.plot(
                     x,
                     beta_dist.pdf(
                         x,
-                        a=alphas[node.id][0],
-                        b=betas[node.id][0],
+                        a=alphas[network_id][0],
+                        b=betas[network_id][0],
                     ),
                     color=color,
                 )
@@ -262,64 +273,74 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     x,
                     beta_dist.pdf(
                         x,
-                        a=alphas[node.id][1],
-                        b=betas[node.id][1],
+                        a=alphas[network_id][1],
+                        b=betas[network_id][1],
                     ),
                     color=color,
                     ls="dashed",
                 )
 
-            # ax.set_xlim(0, entropy([Phi[0], 1 - Phi[0]]))
-            # ax.set_ylim(0, 60)
             plt.show()
 
-        best_node = sorted(
+        best_network = sorted(
             list(rewards.keys()),
-            key=lambda node: rewards[node],
+            key=lambda network_id: rewards[network_id],
             reverse=True,
         )[0]
 
-        if len(nodes) == 15:
+        if len(networks_ids) == 15:
             with open(
                 "output/utility.csv", "a", newline=""
             ) as file:
                 writer = csv.writer(file)
                 writer.writerow(
                     [
-                        rewards[best_node],
-                        eig[best_node],
-                        utility[best_node],
+                        rewards[best_network],
+                        eig[best_network],
+                        utility[best_network],
                     ]
                 )
 
-        for node in nodes:
-            if node.id == best_node:
-                logger.info(node.definition)
+        return best_network
 
-        return best_node
+    def prior_data(self, participant, experiment):
+        data = dict()
 
-    def custom_network_filter(
-        self,
-        candidates,
-        participant,
+        networks = self.network_class.query.filter_by(
+            trial_maker_id=self.id, full=False, failed=False
+        )
+
+        for network in networks:
+            data[network.id] = []
+
+            for trial in network.head.viable_trials:
+                y = trial.get_y()
+
+                data[network.id].append(
+                    {
+                        "y": y,
+                        "z": participant.var.z,
+                        "participant_id": participant.id,
+                        "trial_id": trial.id,
+                    }
+                )
+
+        return data
+
+    def prioritize_networks(
+        self, networks, participant, experiment
     ):
+        candidates = {
+            network.id: network for network in networks
+        }
 
-        nodes = [network.head for network in candidates]
+        data = self.prior_data(participant, experiment)
 
-        z = participant.var.z
+        next_network = self.get_optimal_treatment(
+            list(candidates.keys()), participant, data
+        )
 
-        next_node_id = self.get_optimal_treatment(nodes, z)
-
-        for candidate in candidates:
-            if any(
-                [
-                    node.id == next_node_id
-                    for node in candidate.nodes()
-                ]
-            ):
-                return [candidate]
-
-        return candidates
+        return [candidates[next_network]]
 
     def finalize_trial(
         self,
@@ -333,10 +354,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             in trial.node.definition["answers"]
         )
 
-        response = Response.query.filter_by(
-            question="formal_education",
-            participant_id=participant.id,
-        ).one()
+        trial.var.z = trial.participant.var.z
 
         super().finalize_trial(
             answer,
