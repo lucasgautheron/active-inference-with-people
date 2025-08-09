@@ -241,12 +241,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             # U = 0.1 * (
             #     2 * np.mean(y[1]) - 2 * np.mean(y[0])
             # )
-            epsilon = 0.1
+            epsilon = np.random.beta(1, 2, n_samples)
             U = np.mean(
                 np.log(
                     y[1] * (1 - epsilon)
                     + (1 - y[1]) * epsilon
-                    + y[0] * epsilon
+                )
+                + np.log(
+                    y[0] * epsilon
                     + (1 - y[0]) * (1 - epsilon)
                 )
             )
