@@ -55,9 +55,9 @@ class Oracle:
             for i in range(len(answers))
         ]
 
-        self.education = pd.read_csv(
-            "static/education.csv"
-        )["college"].values[mask]
+        self.education = pd.read_csv("static/education.csv")["college"].values[
+            mask
+        ]
 
         logger.info("Oracle data:")
         logger.info(answers.shape)
@@ -73,7 +73,9 @@ oracle = Oracle()
 
 
 class KnowledgeTrial(StaticTrial):
-    time_estimate = 10  # how long it should take to complete each trial, in seconds
+    time_estimate = (
+        10  # how long it should take to complete each trial, in seconds
+    )
 
     def __init__(
         self,
@@ -175,16 +177,12 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     ),
                 },
             )
-            for i, question in enumerate(
-                questions.to_dict(orient="records")
-            )
+            for i, question in enumerate(questions.to_dict(orient="records"))
         ]
 
         return nodes
 
-    def get_optimal_treatment(
-        self, networks_ids, participant, data
-    ):
+    def get_optimal_treatment(self, networks_ids, participant, data):
         z_i = participant.var.z
 
         n_samples = 1000
@@ -197,12 +195,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         betas = dict()
 
         z_participants = np.array(
-            [
-                participant["z"]
-                for participant in data[
-                    "participants"
-                ].values()
-            ]
+            [participant["z"] for participant in data["participants"].values()]
         )
 
         alpha_z = 1 + np.sum(z_participants == 1)
@@ -213,9 +206,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             alpha = np.ones(2)
             beta = np.ones(2)
 
-            for trial_id, trial in data["networks"][
-                network_id
-            ].items():
+            for trial_id, trial in data["networks"][network_id].items():
                 if trial["y"] == True:
                     alpha[trial["z"]] += 1
                 elif trial["y"] == False:
@@ -243,21 +234,15 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             )
 
             p_y_given_phi = phi * y + (1 - phi) * (1 - y)
-            p_y = alpha / (alpha + beta) * y + beta / (
-                alpha + beta
-            ) * (1 - y)
+            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
 
-            EIG = np.mean(
-                np.log(p_y_given_phi[z_i] / p_y[z_i])
-            )
+            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
             gamma = 0.1
             U = np.mean(
                 np.log(
-                    p_z
-                    * np.exp(gamma * (y[1] - (1 - y[1])))
-                    + (1 - p_z)
-                    * np.exp(gamma * ((1 - y[0]) - y[0])),
+                    p_z * np.exp(gamma * (y[1] - (1 - y[1])))
+                    + (1 - p_z) * np.exp(gamma * ((1 - y[0]) - y[0])),
                 )
             )
 
@@ -267,10 +252,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         from matplotlib import pyplot as plt
 
-        if (
-            np.random.uniform() > 1
-            and len(networks_ids) == 15
-        ):
+        if np.random.uniform() > 1 and len(networks_ids) == 15:
             cmap = plt.get_cmap("tab10")
             fig, ax = plt.subplots()
             for network_id in networks_ids:
@@ -306,9 +288,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )[0]
 
         if len(networks_ids) == 15:
-            with open(
-                "output/utility.csv", "a", newline=""
-            ) as file:
+            with open("output/utility.csv", "a", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(
                     [
@@ -339,26 +319,17 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     "participant_id": trial.participant.id,
                 }
 
-                if (
-                    trial.participant.id
-                    not in data["participants"]
-                ):
-                    data["participants"][
-                        trial.participant.id
-                    ] = {
+                if trial.participant.id not in data["participants"]:
+                    data["participants"][trial.participant.id] = {
                         "z": trial.participant.var.z,
                     }
 
         return data
 
-    def prioritize_networks(
-        self, networks, participant, experiment
-    ):
+    def prioritize_networks(self, networks, participant, experiment):
         return networks
 
-        candidates = {
-            network.id: network for network in networks
-        }
+        candidates = {network.id: network for network in networks}
 
         data = self.prior_data(experiment)
 
@@ -375,10 +346,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         experiment,
         participant,
     ):
-        trial.var.y = (
-            trial.answer.lower()
-            in trial.node.definition["answers"]
-        )
+        trial.var.y = trial.answer.lower() in trial.node.definition["answers"]
 
         trial.var.z = bool(trial.participant.var.z)
 
