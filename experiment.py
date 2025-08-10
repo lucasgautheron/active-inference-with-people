@@ -139,9 +139,6 @@ class ActiveInference:
 
     def _model(self, participants, items):
         """Model of the data-generating process"""
-        # Get the maximum participant ID
-        # to determine how many participants we have
-
         # Sample ability parameters
         # for all participants: theta_i ~ N(0, 2)
         thetas = pyro.sample(
@@ -179,8 +176,6 @@ class ActiveInference:
             ),
         )
 
-        # Select abilities and difficulties
-        # for the observations
         selected_thetas = thetas[participants.long()]
         selected_difficulties = difficulties[items.long()]
 
@@ -358,7 +353,7 @@ class ActiveInference:
             if i % 100 == 0:
                 logger.debug(f"  Iteration {i}, ELBO: {elbo:.3f}")
 
-        # Extract updated parameters
+        # Extract parameters
         self.theta_means = pyro.param("theta_means").detach().clone()
         self.theta_sds = pyro.param("theta_sds").detach().clone()
         self.difficulty_means = pyro.param("mean_difficulties").detach().clone()
@@ -502,8 +497,6 @@ class KnowledgeTrial(StaticTrial):
 
         # Keeps track of whether the participant correctly answered
         self.var.y = None
-        self.var.ability_mean = None
-        self.var.ability_sd = None
 
     def get_y(self):
         return self.var.y
@@ -652,9 +645,8 @@ class Exp(psynet.experiment.Experiment):
     test_mode = "serial"
 
     timeline = Timeline(
-        # MainConsent(),
-        # BasicDemography(),
-        # Income(),
+        MainConsent(),
+        BasicDemography(),
         KnowledgeTrialMaker(),
         SuccessfulEndPage(),
     )
