@@ -299,36 +299,24 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             plt.legend()
             plt.show()
 
-        reward_values = np.array(list(rewards.values()))
-        gamma = 10
-        softmax_probs = softmax(gamma * reward_values)
-        network_ids = list(rewards.keys())
-
-        # best_network = np.random.choice(
-        #     network_ids, p=softmax_probs
-        # )
-
         best_network = sorted(
             list(rewards.keys()),
             key=lambda network_id: rewards[network_id],
             reverse=True,
         )[0]
 
-        # if len(networks_ids) == 15:
-        #     with open(
-        #         "output/utility.csv", "a", newline=""
-        #     ) as file:
-        #         writer = csv.writer(file)
-        #         writer.writerow(
-        #             [
-        #                 rewards[best_network],
-        #                 eig[best_network],
-        #                 utility[best_network],
-        #                 softmax_probs[
-        #                     network_ids.index(best_network)
-        #                 ],
-        #             ]
-        #         )
+        if len(networks_ids) == 15:
+            with open(
+                "output/utility.csv", "a", newline=""
+            ) as file:
+                writer = csv.writer(file)
+                writer.writerow(
+                    [
+                        rewards[best_network],
+                        eig[best_network],
+                        utility[best_network],
+                    ]
+                )
 
         return best_network
 
