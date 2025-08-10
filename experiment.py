@@ -8,8 +8,8 @@ import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
 from psynet.timeline import Timeline
+from psynet.participant import Participant
 from psynet.trial.static import (
-    StaticNetwork,
     StaticNode,
     StaticTrial,
     StaticTrialMaker,
@@ -31,7 +31,6 @@ from pyro.optim import Adam
 
 from matplotlib import pyplot as plt
 from scipy.stats import norm
-from os.path import exists
 
 import pandas as pd
 
@@ -68,24 +67,11 @@ class Oracle:
 oracle = Oracle()
 
 
-class AdaptiveLearner:
+class ActiveInference:
     """Adaptive Bayesian Learner"""
 
     def __init__(self, num_items):
         logger.debug("Initializing adaptive learner.")
-
-        # Number of challenges
-        self.num_items = num_items
-
-        # Initialize data storage
-        self.participant_indices = torch.empty(
-            0,
-            dtype=torch.long,
-        )
-        self.item_indices = torch.empty(0, dtype=torch.long)
-        self.responses = torch.empty(0)
-
-        self.participants = {}
 
         # Priors parameters
         self.prior_mean_theta = torch.tensor(0.0)
@@ -95,71 +81,17 @@ class AdaptiveLearner:
         self.prior_mean_intercept = torch.tensor(0.0)
         self.prior_sd_intercept = torch.tensor(1.0)
 
-        # Current posterior estimates for individual knowledge
-        self.posterior_theta_means = torch.empty(0)
-        self.posterior_theta_sds = torch.empty(0)
-
-        # Current posterior estimates for difficulties
-        self.posterior_difficulty_means = torch.tensor(
-            [0.0] * self.num_items,
-        )
-        self.posterior_difficulty_sds = torch.tensor(
-            [1.0] * self.num_items,
-        )
-
-        # Current posterior estimates for intercept
-        self.posterior_intercept_mean = torch.tensor(
-            self.prior_mean_intercept,
-        )
-        self.posterior_intercept_sd = torch.tensor(
-            self.prior_sd_intercept,
-        )
+        self.theta_means = torch.empty(0)
+        self.theta_sds = torch.empty(0)
+        self.difficulty_means = torch.empty(0)
+        self.difficulty_sds = torch.empty(0)
+        self.intercept_mean = torch.tensor(0.0)
+        self.intercept_sd = torch.tensor(0.0)
 
         # EIG computation parameters
         self.num_steps = 1000
         self.start_lr = 0.1
         self.end_lr = 0.001
-
-    def add_participant(self, participant):
-        """Add a new participant to the study"""
-        new_participant_id = len(self.participants)
-        self.participants[new_participant_id] = (
-            participant.id
-        )
-
-        # Expand theta tracking tensors for new participant
-        self.posterior_theta_means = torch.cat(
-            [
-                self.posterior_theta_means,
-                torch.tensor([self.prior_mean_theta]),
-                # Prior mean for new participant
-            ],
-        )
-        self.posterior_theta_sds = torch.cat(
-            [
-                self.posterior_theta_sds,
-                torch.tensor([self.prior_sd_theta]),
-                # Prior std for new participant
-            ],
-        )
-
-        logger.debug(
-            f"AdaptiveLearner added new participant: {new_participant_id}",
-        )
-
-        return new_participant_id
-
-    def get_participant(self, participant):
-        for (
-            pid,
-            participant_id,
-        ) in self.participants.items():
-            if participant.id == participant_id:
-                return pid
-
-        raise Exception(
-            f"Participant {participant.id} not found",
-        )
 
     def _make_design_model(self, target_participant):
         """Create a model for a specific participant
@@ -170,12 +102,8 @@ class AdaptiveLearner:
             theta = pyro.sample(
                 "theta",
                 dist.Normal(
-                    self.posterior_theta_means[
-                        target_participant
-                    ],
-                    self.posterior_theta_sds[
-                        target_participant
-                    ],
+                    self.theta_means[target_participant],
+                    self.theta_sds[target_participant],
                 ),
             )
             theta = theta.unsqueeze(-1)
@@ -184,18 +112,16 @@ class AdaptiveLearner:
             difficulties = pyro.sample(
                 "difficulties",
                 dist.Normal(
-                    self.posterior_difficulty_means[
-                        item_idx
-                    ],
-                    self.posterior_difficulty_sds[item_idx],
+                    self.difficulty_means[item_idx],
+                    self.difficulty_sds[item_idx],
                 ),
             ).unsqueeze(-1)
 
             intercept = pyro.sample(
                 "intercept",
                 dist.Normal(
-                    self.posterior_intercept_mean,
-                    self.posterior_intercept_sd,
+                    self.intercept_mean,
+                    self.intercept_sd,
                 ),
             ).unsqueeze(-1)
             logit_p = (theta - difficulties) + intercept
@@ -211,16 +137,10 @@ class AdaptiveLearner:
 
         return model
 
-    def _model(self, participant_indices, item_indices):
+    def _model(self, participants, items):
         """Model of the data-generating process"""
         # Get the maximum participant ID
         # to determine how many participants we have
-        max_participant = (
-            int(
-                participant_indices.max().item(),
-            )
-            + 1
-        )
 
         # Sample ability parameters
         # for all participants: theta_i ~ N(0, 2)
@@ -231,7 +151,7 @@ class AdaptiveLearner:
                 self.prior_sd_theta,
             )
             .expand(
-                [max_participant],
+                [self.num_participants],
             )
             .to_event(1),
         )
@@ -261,15 +181,11 @@ class AdaptiveLearner:
 
         # Select abilities and difficulties
         # for the observations
-        selected_thetas = thetas[participant_indices.long()]
-        selected_difficulties = difficulties[
-            item_indices.long()
-        ]
+        selected_thetas = thetas[participants.long()]
+        selected_difficulties = difficulties[items.long()]
 
         # Logistic regression model with intercept
-        logit_p = (
-            selected_thetas - selected_difficulties
-        ) + intercept
+        logit_p = (selected_thetas - selected_difficulties) + intercept
         y = pyro.sample(
             "y",
             dist.Bernoulli(
@@ -278,30 +194,23 @@ class AdaptiveLearner:
         )
         return y
 
-    def _guide(self, participant_indices, item_indices):
+    def _guide(self, participants, items):
         """Guide for multiple participants
         with hierarchical theta structure"""
-        # Get the maximum participant ID to determine how many participants we have
-        max_participant = (
-            int(
-                participant_indices.max().item(),
-            )
-            + 1
-        )
 
         # Guide for thetas
         # (means and sds)
-        posterior_theta_means = pyro.param(
-            "posterior_theta_means",
+        theta_means = pyro.param(
+            "theta_means",
             torch.full(
-                [max_participant],
+                [self.num_participants],
                 self.prior_mean_theta,
             ),
         )
-        posterior_theta_sds = pyro.param(
-            "posterior_theta_sds",
+        theta_sds = pyro.param(
+            "theta_sds",
             torch.full(
-                [max_participant],
+                [self.num_participants],
                 self.prior_sd_theta,
             ),
             constraint=positive,
@@ -309,20 +218,20 @@ class AdaptiveLearner:
         pyro.sample(
             "thetas",
             dist.Normal(
-                posterior_theta_means,
-                posterior_theta_sds,
+                theta_means,
+                theta_sds,
             ).to_event(1),
         )
 
         # Guide for difficulties
-        posterior_mean_difficulties = pyro.param(
-            "posterior_mean_difficulties",
+        mean_difficulties = pyro.param(
+            "mean_difficulties",
             self.prior_mean_difficulty.expand(
                 [self.num_items],
             ).clone(),
         )
-        posterior_sd_difficulties = pyro.param(
-            "posterior_sd_difficulties",
+        sd_difficulties = pyro.param(
+            "sd_difficulties",
             self.prior_sd_difficulty.expand(
                 [self.num_items],
             ).clone(),
@@ -331,26 +240,26 @@ class AdaptiveLearner:
         pyro.sample(
             "difficulties",
             dist.Normal(
-                posterior_mean_difficulties,
-                posterior_sd_difficulties,
+                mean_difficulties,
+                sd_difficulties,
             ).to_event(1),
         )
 
         # Guide for intercept
-        posterior_mean_intercept = pyro.param(
-            "posterior_mean_intercept",
+        mean_intercept = pyro.param(
+            "mean_intercept",
             self.prior_mean_intercept.clone(),
         )
-        posterior_sd_intercept = pyro.param(
-            "posterior_sd_intercept",
+        sd_intercept = pyro.param(
+            "sd_intercept",
             self.prior_sd_intercept.clone(),
             constraint=positive,
         )
         pyro.sample(
             "intercept",
             dist.Normal(
-                posterior_mean_intercept,
-                posterior_sd_intercept,
+                mean_intercept,
+                sd_intercept,
             ),
         )
 
@@ -372,41 +281,103 @@ class AdaptiveLearner:
             ),
         )
 
-    def get_optimal_test(
-        self,
-        participant_id: int,
-        candidates: np.array,
-    ):
-        """Find the optimal test item
-        for a given participant"""
+    def init_parameters(self, num_participants, num_items):
+        self.num_participants = num_participants
+        self.num_items = num_items
+
+        self.theta_means = torch.full([num_participants], self.prior_mean_theta)
+        self.theta_sds = torch.full([num_participants], self.prior_sd_theta)
+        self.difficulty_means = torch.full(
+            [num_items], self.prior_mean_difficulty
+        )
+        self.difficulty_sds = torch.full([num_items], self.prior_sd_difficulty)
+        self.intercept_mean = torch.tensor(self.prior_mean_intercept)
+        self.intercept_sd = torch.tensor(self.prior_sd_intercept)
+
+    def update_posterior(self, data):
+        """Update posterior beliefs based on all collected experimental data"""
+
+        participants = []
+        items = []
+        responses = []
+
+        for network_id, trials in data["networks"].items():
+            for trial_id, trial_data in trials.items():
+                y = trial_data["y"]
+                participants.append(trial_data["participant_id"])
+                items.append(network_id)
+                responses.append(float(y))
+
+            logger.info(responses)
+
+        participants = torch.tensor(participants, dtype=torch.long)
+        items = torch.tensor(items, dtype=torch.long)
+        responses = torch.tensor(responses)
+
+        # Initialize parameters with correct sizes
+        self.init_parameters(
+            np.max(data["participants"]),
+            len(data["networks"]),
+        )
+
+        logger.info("theta")
+        logger.info(self.theta_means.shape)
+
+        pyro.clear_param_store()
+
+        # The statistical model conditioned on all prior responses
+        conditioned_model = pyro.condition(self._model, {"y": responses})
+
+        # Instantiate the stochastic variational inference
+        svi = SVI(
+            conditioned_model,
+            self._guide,
+            Adam({"lr": 0.02}),
+            loss=Trace_ELBO(),
+        )
+
+        # Fit the model
+        for i in range(self.num_steps):
+            elbo = svi.step(participants - 1, items - 1)
+            if i % 100 == 0:
+                logger.debug(f"  Iteration {i}, ELBO: {elbo:.3f}")
+
+        # Extract updated parameters
+        self.theta_means = pyro.param("theta_means").detach().clone()
+        self.theta_sds = pyro.param("theta_sds").detach().clone()
+        self.difficulty_means = pyro.param("mean_difficulties").detach().clone()
+        self.difficulty_sds = pyro.param("sd_difficulties").detach().clone()
+        self.intercept_mean = pyro.param("mean_intercept").detach().clone()
+        self.intercept_sd = pyro.param("sd_intercept").detach().clone()
+
+        logger.debug("Posterior update completed")
+
+    def get_optimal_test(self, candidates, participant, data):
+        # Update posterior with current data
+        self.update_posterior(data)
+
+        # Get available items for this participant
+        # This is a simplified version - you'll need to map networks to items properly
+        available_items = np.array(candidates)
+
         # Create design model for this participant
         pyro.clear_param_store()
-        design_model = self._make_design_model(
-            participant_id,
-        )
+        design_model = self._make_design_model(participant.id - 1)
 
         # Candidate designs (available items)
         candidate_designs = torch.tensor(
-            candidates,
-            dtype=torch.float,
+            available_items - 1, dtype=torch.float
         ).unsqueeze(-1)
-
-        if len(candidates) == 0:
-            raise ValueError(
-                "No available items to choose from",
-            )
 
         optimizer = pyro.optim.ExponentialLR(
             {
                 "optimizer": torch.optim.Adam,
                 "optim_args": {"lr": self.start_lr},
-                "gamma": (self.end_lr / self.start_lr)
-                ** (1 / self.num_steps),
-            },
+                "gamma": (self.end_lr / self.start_lr) ** (1 / self.num_steps),
+            }
         )
 
-        # Compute Expected Information Gain
-        # for each candidate item
+        # Compute Expected Information Gain for each candidate item
         eig = marginal_eig(
             design_model,
             candidate_designs,
@@ -421,31 +392,23 @@ class AdaptiveLearner:
 
         # Find the item with maximum EIG
         best_idx = torch.argmax(eig)
-        optimal_item = candidates[best_idx]
+        optimal_test = available_items[best_idx]
         best_eig = eig.detach().max()
 
-        p = (
-            torch.special.expit(
-                pyro.param("q_logit"),
-            )
-            .detach()
-            .numpy()
-        )
+        # Apply stopping criteria
+        p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
         entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
 
         if best_eig < 0.02 and np.max(entropy) < 0.7:
-            optimal_item = None
+            logger.debug("Stopping criteria met - low EIG and entropy")
+            return None
 
         if DEBUG_MODE:
             x = np.linspace(-3, +3, 200)
             y = norm.pdf(
                 x,
-                loc=self.posterior_theta_means[
-                    participant_id
-                ],
-                scale=self.posterior_theta_sds[
-                    participant_id
-                ],
+                loc=self.theta_means[participant.id - 1],
+                scale=self.theta_sds[participant.id - 1],
             )
 
             plt.plot(x, y, label="Participant ability")
@@ -456,14 +419,10 @@ class AdaptiveLearner:
                 color = cmap(i)
                 y = norm.pdf(
                     x,
-                    loc=self.posterior_difficulty_means[
-                        item
-                    ]
-                    - self.posterior_intercept_mean,
+                    loc=self.difficulty_means[item - 1] - self.intercept_mean,
                     scale=np.sqrt(
-                        self.posterior_difficulty_sds[item]
-                        ** 2
-                        + self.posterior_intercept_sd**2,
+                        self.difficulty_sds[item - 1] ** 2
+                        + self.intercept_sd**2,
                     ),
                 )
                 plt.plot(
@@ -475,10 +434,7 @@ class AdaptiveLearner:
                 )
                 plt.scatter(
                     [
-                        self.posterior_difficulty_means[
-                            item
-                        ]
-                        - self.posterior_intercept_mean,
+                        self.difficulty_means[item - 1] - self.intercept_mean,
                     ],
                     [eig.detach()[i]],
                     color=color,
@@ -486,10 +442,7 @@ class AdaptiveLearner:
 
                 plt.scatter(
                     [
-                        self.posterior_difficulty_means[
-                            item
-                        ]
-                        - self.posterior_intercept_mean,
+                        self.difficulty_means[item - 1] - self.intercept_mean,
                     ],
                     [entropy[i]],
                     color="black",
@@ -498,125 +451,17 @@ class AdaptiveLearner:
                 plt.ylim(0, 1)
 
             plt.savefig(
-                "output/test_{}.png".format(participant_id),
+                "output/test_{}.png".format(participant.id),
             )
             plt.clf()
 
-        return optimal_item
-
-    def administer_response(
-        self,
-        participant_id,
-        item_id,
-        response,
-    ):
-        """Record a participant's response to an item"""
-        # Convert response to tensor if it's not already
-        if not isinstance(response, torch.Tensor):
-            response = torch.tensor(float(response))
-
-        # Store the result
-        self.participant_indices = torch.cat(
-            [
-                self.participant_indices,
-                torch.tensor([participant_id]),
-            ],
-            dim=0,
-        )
-        self.item_indices = torch.cat(
-            [self.item_indices, torch.tensor([item_id])],
-            dim=0,
-        )
-        self.responses = torch.cat(
-            [self.responses, response.expand(1)],
-        )
-
-    def update_posterior(self):
-        """Update posterior beliefs based on collected data"""
-        if len(self.responses) == 0:
-            return
-
-        logger.debug("Updating posterior...")
-        pyro.clear_param_store()
-
-        # The statistical model
-        # conditioned on all prior responses :
-        conditioned_model = pyro.condition(
-            self._model,
-            {
-                "y": self.responses,
-            },
-        )
-
-        # Instantiate the stochastic variational inference
-        svi = SVI(
-            conditioned_model,  # True model
-            self._guide,
-            # The variational approximation of the posterior
-            Adam({"lr": 0.02}),
-            # The optimization algorithm
-            loss=Trace_ELBO(),
-        )
-
-        # Fit the model
-        for i in range(self.num_steps):
-            elbo = svi.step(
-                self.participant_indices,
-                self.item_indices,
-            )
-            if i % 100 == 0:
-                logger.debug(
-                    f"  Iteration {i}, ELBO: {elbo:.3f}",
-                )
-
-        # Extract updated parameters
-        self.posterior_theta_means = (
-            pyro.param(
-                "posterior_theta_means",
-            )
-            .detach()
-            .clone()
-        )
-        self.posterior_theta_sds = (
-            pyro.param(
-                "posterior_theta_sds",
-            )
-            .detach()
-            .clone()
-        )
-
-        self.posterior_difficulty_means = (
-            pyro.param(
-                "posterior_mean_difficulties",
-            )
-            .detach()
-            .clone()
-        )
-        self.posterior_difficulty_sds = (
-            pyro.param(
-                "posterior_sd_difficulties",
-            )
-            .detach()
-            .clone()
-        )
-        self.posterior_intercept_mean = (
-            pyro.param(
-                "posterior_mean_intercept",
-            )
-            .detach()
-            .clone()
-        )
-        self.posterior_intercept_sd = (
-            pyro.param(
-                "posterior_sd_intercept",
-            )
-            .detach()
-            .clone()
-        )
+        return optimal_test
 
 
 class KnowledgeTrial(StaticTrial):
-    time_estimate = 10  # how long it should take to complete each trial, in seconds
+    time_estimate = (
+        10  # how long it should take to complete each trial, in seconds
+    )
 
     def __init__(
         self,
@@ -638,9 +483,12 @@ class KnowledgeTrial(StaticTrial):
         )
 
         # Keeps track of whether the participant correctly answered
-        self.var.correct = None
+        self.var.y = None
         self.var.ability_mean = None
         self.var.ability_sd = None
+
+    def get_y(self):
+        return self.var.y
 
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
@@ -669,7 +517,7 @@ class KnowledgeTrial(StaticTrial):
         return InfoPage(
             (
                 "Congratulations, this is correct!"
-                if self.var.correct == True
+                if self.var.y == True
                 else "Nice try, but no :("
             ),
         )
@@ -703,7 +551,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
 
         logger.info("Initializing adaptive learner.")
-        self.learner = AdaptiveLearner(len(nodes))
+        self.ai = ActiveInference(len(nodes))
 
     def load_nodes(self):
         questions = pd.read_csv("static/questions.csv")
@@ -720,60 +568,47 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     ),
                 },
             )
-            for i, question in enumerate(
-                questions.to_dict(orient="records")
-            )
+            for i, question in enumerate(questions.to_dict(orient="records"))
         ]
 
         return nodes
 
-    def custom_network_filter(
-        self,
-        candidates,
-        participant,
-    ):
-        logger.info("Getting data for participant")
+    def prior_data(self, experiment):
+        data = {"networks": dict(), "participants": []}
 
-        if (
-            participant.id
-            not in self.learner.participants.values()
-        ):
-            logger.info("New participant")
-            pid = self.learner.add_participant(participant)
-            logger.info(self.learner.participants)
-        else:
-            pid = self.learner.get_participant(participant)
-
-        candidate_items = []
-
-        logger.info(candidates)
-        for candidate in candidates:
-            candidate_items += [
-                node.definition["item_id"]
-                for node in candidate.nodes()
-            ]
-
-        # choose best item
-        next_node_id = self.learner.get_optimal_test(
-            pid,
-            np.array(candidate_items),
+        networks = self.network_class.query.filter_by(
+            trial_maker_id=self.id, full=False, failed=False
         )
 
-        if next_node_id is None:
+        for network in networks:
+            data["networks"][network.id] = dict()
+
+            for trial in network.head.viable_trials:
+                y = trial.get_y()
+
+                data["networks"][network.id][trial.id] = {
+                    "y": y,
+                    "participant_id": trial.participant.id,
+                }
+
+        data["participants"] = [
+            participant.id for participant in Participant.query.all()
+        ]
+
+        return data
+
+    def prioritize_networks(self, networks, participant, experiment):
+        candidates = {network.id: network for network in networks}
+
+        data = self.prior_data(experiment)
+        next_network = self.ai.get_optimal_test(
+            list(candidates.keys()), participant, data
+        )
+
+        if next_network is None:
             return []
 
-        # recover the retained candidate
-        for candidate in candidates:
-            if any(
-                [
-                    node.definition["item_id"]
-                    == next_node_id
-                    for node in candidate.nodes()
-                ],
-            ):
-                return [candidate]
-
-        return candidates
+        return [candidates[next_network]]
 
     def finalize_trial(
         self,
@@ -782,50 +617,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         experiment,
         participant,
     ):
-        trial.var.correct = (
-            trial.answer.lower()
-            in trial.node.definition["answers"]
-        )
-
-        logger.info(
-            "Finalizing trial, looking for participant",
-        )
-        if (
-            participant.id
-            not in self.learner.participants.values()
-        ):
-            logger.info("New participant")
-            pid = self.learner.add_participant(participant)
-        else:
-            pid = self.learner.get_participant(participant)
-
-        self.learner.administer_response(
-            pid,
-            trial.node.definition["item_id"],
-            trial.var.correct,
-        )
-
-        self.learner.update_posterior()
-
-        mu = self.learner.posterior_theta_means[pid]
-        sd = self.learner.posterior_theta_sds[pid]
-        logger.info(
-            f"Posterior participant ability: N({mu:.2f}, {sd:.2f})",
-        )
-        trial.var.ability_mean = float(mu)
-        trial.var.ability_sd = float(sd)
-
-        mu = self.learner.posterior_difficulty_means[
-            trial.node.definition["item_id"]
-        ]
-        sd = self.learner.posterior_difficulty_sds[
-            trial.node.definition["item_id"]
-        ]
-        logger.info(
-            f"Posterior item difficulty: N({mu:.2f}, {sd:.2f})",
-        )
-        logger.info(trial.node.definition["question"])
-        logger.info(trial.answer)
+        trial.var.y = trial.answer.lower() in trial.node.definition["answers"]
 
         super().finalize_trial(
             answer,
@@ -842,9 +634,9 @@ class Exp(psynet.experiment.Experiment):
     test_mode = "serial"
 
     timeline = Timeline(
-        MainConsent(),
-        BasicDemography(),
-        Income(),
+        # MainConsent(),
+        # BasicDemography(),
+        # Income(),
         KnowledgeTrialMaker(),
         SuccessfulEndPage(),
     )
