@@ -303,21 +303,37 @@ class ActiveInference:
 
         for network_id, trials in data["networks"].items():
             for trial_id, trial_data in trials.items():
-                y = trial_data["y"]
                 participants.append(trial_data["participant_id"])
                 items.append(network_id)
-                responses.append(float(y))
+                responses.append(float(trial_data["y"]))
 
             logger.info(responses)
 
-        participants = torch.tensor(participants, dtype=torch.long)
-        items = torch.tensor(items, dtype=torch.long)
+        self.participant_index = {
+            participant: idx
+            for idx, participant in enumerate(data["participants"])
+        }
+        self.item_index = {
+            item: idx for idx, item in enumerate(data["networks"].keys())
+        }
+        logger.info(self.item_index)
+
+        participants = torch.tensor(
+            [
+                self.participant_index[participant]
+                for participant in participants
+            ],
+            dtype=torch.long,
+        )
+        items = torch.tensor(
+            [self.item_index[item] for item in items], dtype=torch.long
+        )
         responses = torch.tensor(responses)
 
         # Initialize parameters with correct sizes
         self.init_parameters(
-            np.max(data["participants"]),
-            len(data["networks"]),
+            len(self.participant_index),
+            len(self.item_index),
         )
 
         logger.info("theta")
@@ -338,7 +354,7 @@ class ActiveInference:
 
         # Fit the model
         for i in range(self.num_steps):
-            elbo = svi.step(participants - 1, items - 1)
+            elbo = svi.step(participants, items)
             if i % 100 == 0:
                 logger.debug(f"  Iteration {i}, ELBO: {elbo:.3f}")
 
@@ -356,17 +372,16 @@ class ActiveInference:
         # Update posterior with current data
         self.update_posterior(data)
 
-        # Get available items for this participant
-        # This is a simplified version - you'll need to map networks to items properly
-        available_items = np.array(candidates)
-
         # Create design model for this participant
         pyro.clear_param_store()
-        design_model = self._make_design_model(participant.id - 1)
+        design_model = self._make_design_model(
+            self.participant_index[participant.id]
+        )
 
-        # Candidate designs (available items)
+        # Candidate designs
         candidate_designs = torch.tensor(
-            available_items - 1, dtype=torch.float
+            [self.item_index[item] for item in candidates],
+            dtype=torch.float,
         ).unsqueeze(-1)
 
         optimizer = pyro.optim.ExponentialLR(
@@ -392,10 +407,10 @@ class ActiveInference:
 
         # Find the item with maximum EIG
         best_idx = torch.argmax(eig)
-        optimal_test = available_items[best_idx]
+        optimal_test = candidates[best_idx]
         best_eig = eig.detach().max()
 
-        # Apply stopping criteria
+        # Apply early-stopping criteria
         p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
         entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
 
@@ -407,8 +422,8 @@ class ActiveInference:
             x = np.linspace(-3, +3, 200)
             y = norm.pdf(
                 x,
-                loc=self.theta_means[participant.id - 1],
-                scale=self.theta_sds[participant.id - 1],
+                loc=self.theta_means[self.participant_index[participant.id]],
+                scale=self.theta_sds[self.participant_index[participant.id]],
             )
 
             plt.plot(x, y, label="Participant ability")
@@ -419,9 +434,10 @@ class ActiveInference:
                 color = cmap(i)
                 y = norm.pdf(
                     x,
-                    loc=self.difficulty_means[item - 1] - self.intercept_mean,
+                    loc=self.difficulty_means[self.item_index[item]]
+                    - self.intercept_mean,
                     scale=np.sqrt(
-                        self.difficulty_sds[item - 1] ** 2
+                        self.difficulty_sds[self.item_index[item]] ** 2
                         + self.intercept_sd**2,
                     ),
                 )
@@ -434,7 +450,8 @@ class ActiveInference:
                 )
                 plt.scatter(
                     [
-                        self.difficulty_means[item - 1] - self.intercept_mean,
+                        self.difficulty_means[self.item_index[item]]
+                        - self.intercept_mean,
                     ],
                     [eig.detach()[i]],
                     color=color,
@@ -442,7 +459,8 @@ class ActiveInference:
 
                 plt.scatter(
                     [
-                        self.difficulty_means[item - 1] - self.intercept_mean,
+                        self.difficulty_means[self.item_index[item]]
+                        - self.intercept_mean,
                     ],
                     [entropy[i]],
                     color="black",
