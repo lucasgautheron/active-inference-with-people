@@ -145,10 +145,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             id_="knowledge",
             # number questions administered
             # to each participant (estimate)
-            expected_trials_per_participant=10,
+            expected_trials_per_participant=5,
             # number of questions administered
             # to each participant (maximum)
-            max_trials_per_participant=10,
+            max_trials_per_participant=5,
             # can the same question be shown multiple times?
             allow_repeated_nodes=False,
             # the class of the trials delivered
@@ -187,7 +187,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     ):
         z_i = participant.var.z
 
-        n_samples = 10000
+        n_samples = 1000
 
         rewards = dict()
         eig = dict()
@@ -196,18 +196,30 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         alphas = dict()
         betas = dict()
 
+        z_participants = np.array(
+            [
+                participant["z"]
+                for participant in data[
+                    "participants"
+                ].values()
+            ]
+        )
+
+        alpha_z = 1 + np.sum(z_participants == 1)
+        beta_z = 1 + np.sum(z_participants == 0)
+        p_z = alpha_z / (alpha_z + beta_z)
+
         for network_id in networks_ids:
             alpha = np.ones(2)
             beta = np.ones(2)
 
-            for trial in data[network_id]:
-                y = trial["y"]
-                z = trial["z"]
-
-                if y == True:
-                    alpha[z] += 1
-                elif y == False:
-                    beta[z] += 1
+            for trial_id, trial in data["networks"][
+                network_id
+            ].items():
+                if trial["y"] == True:
+                    alpha[trial["z"]] += 1
+                elif trial["y"] == False:
+                    beta[trial["z"]] += 1
 
             alphas[network_id] = alpha
             betas[network_id] = beta
@@ -239,20 +251,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 np.log(p_y_given_phi[z_i] / p_y[z_i])
             )
 
-            # epsilon = 0.001
-            # U = np.mean(
-            #     np.log(
-            #         y[1] * (1 - epsilon)
-            #         + (1 - y[1]) * epsilon
-            #     )
-            #     + np.log(
-            #         y[0] * epsilon
-            #         + (1 - y[0]) * (1 - epsilon)
-            #     )
-            # )
             gamma = 0.1
-            U = gamma * np.mean(
-                y[1] - (1 - y[1]) - y[0] + (1 - y[0])
+            U = np.mean(
+                np.log(
+                    p_z
+                    * np.exp(gamma * (y[1] - (1 - y[1])))
+                    + (1 - p_z)
+                    * np.exp(gamma * ((1 - y[0]) - y[0])),
+                )
             )
 
             rewards[network_id] = EIG + U
@@ -269,7 +275,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             fig, ax = plt.subplots()
             for network_id in networks_ids:
                 color = cmap(network_id % 10)
-                logger.info(utility[network_id])
                 x = np.linspace(0, 1, 100)
                 ax.plot(
                     x,
@@ -294,71 +299,80 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             plt.legend()
             plt.show()
 
+        reward_values = np.array(list(rewards.values()))
+        gamma = 10
+        softmax_probs = softmax(gamma * reward_values)
+        network_ids = list(rewards.keys())
+
+        # best_network = np.random.choice(
+        #     network_ids, p=softmax_probs
+        # )
+
         best_network = sorted(
             list(rewards.keys()),
             key=lambda network_id: rewards[network_id],
             reverse=True,
         )[0]
 
-        # reward_values = np.array(list(rewards.values()))
-        # gamma = 10
-        # softmax_probs = softmax(gamma * reward_values)
-        #
-        # network_ids = list(rewards.keys())
-        # best_network = np.random.choice(
-        #     network_ids, p=softmax_probs
-        # )
-
-        if len(networks_ids) == 15:
-            with open(
-                "output/utility.csv", "a", newline=""
-            ) as file:
-                writer = csv.writer(file)
-                writer.writerow(
-                    [
-                        rewards[best_network],
-                        eig[best_network],
-                        utility[best_network],
-                        softmax_probs[
-                            network_ids.index(best_network)
-                        ],
-                    ]
-                )
+        # if len(networks_ids) == 15:
+        #     with open(
+        #         "output/utility.csv", "a", newline=""
+        #     ) as file:
+        #         writer = csv.writer(file)
+        #         writer.writerow(
+        #             [
+        #                 rewards[best_network],
+        #                 eig[best_network],
+        #                 utility[best_network],
+        #                 softmax_probs[
+        #                     network_ids.index(best_network)
+        #                 ],
+        #             ]
+        #         )
 
         return best_network
 
-    def prior_data(self, participant, experiment):
-        data = dict()
+    def prior_data(self, experiment):
+        data = {"networks": dict(), "participants": dict()}
 
         networks = self.network_class.query.filter_by(
             trial_maker_id=self.id, full=False, failed=False
         )
 
         for network in networks:
-            data[network.id] = []
+            data["networks"][network.id] = dict()
 
             for trial in network.head.viable_trials:
                 y = trial.get_y()
 
-                data[network.id].append(
-                    {
-                        "y": y,
+                data["networks"][network.id][trial.id] = {
+                    "y": y,
+                    "z": trial.participant.var.z,
+                    "participant_id": trial.participant.id,
+                }
+
+                if (
+                    trial.participant.id
+                    not in data["participants"]
+                ):
+                    data["participants"][
+                        trial.participant.id
+                    ] = {
                         "z": trial.participant.var.z,
-                        "participant_id": participant.id,
-                        "trial_id": trial.id,
                     }
-                )
 
         return data
 
     def prioritize_networks(
         self, networks, participant, experiment
     ):
+        return networks
+
         candidates = {
             network.id: network for network in networks
         }
 
-        data = self.prior_data(participant, experiment)
+        data = self.prior_data(experiment)
 
         next_network = self.get_optimal_treatment(
             list(candidates.keys()), participant, data
