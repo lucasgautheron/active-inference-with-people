@@ -65,6 +65,7 @@ cbar.set_label(
 )  # 'n' as the colorbar label
 plt.show()
 plt.savefig("output/theta_comparison.pdf", bbox_inches="tight")
+plt.savefig("output/theta_comparison.png", bbox_inches="tight", dpi=300)
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 n = adaptive.groupby("node_id")["participant_id"].count()
@@ -99,7 +100,7 @@ X = n.index.values.reshape(-1, 1)
 y = logit(n / (n.max() + 0.1))
 
 # Create polynomial features (degree 2)
-poly_features = PolynomialFeatures(degree=4, include_bias=True)
+poly_features = PolynomialFeatures(degree=3, include_bias=True)
 X_poly = poly_features.fit_transform(X)
 
 # Fit linear regression with polynomial features
@@ -145,6 +146,7 @@ ax.fill_between(
 ax.set_xlabel("Participant \#")
 ax.set_ylabel("Trials per participant")
 plt.savefig("output/trials_per_participant.pdf", bbox_inches="tight")
+plt.savefig("output/trials_per_participant.png", bbox_inches="tight", dpi=300)
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 n = adaptive.groupby("participant_id")["id"].count()
