@@ -45,18 +45,10 @@ def expected_free_energy(df):
             }
         )
 
-    alpha, beta = 1, 1
-    participants = df.groupby("participant_id")["z"].first()
-    for z_val in participants:
-        if z_val == True:
-            alpha += 1
-        elif z_val == False:
-            beta += 1
-    Phi = np.random.beta(alpha, beta, n_samples)
-
     # Get unique participants and their z values
     participants = df.groupby("participant_id")["z"].first()
 
+    alpha, beta = 1, 1
     for z_val in participants:
         if z_val == True:
             alpha += 1
@@ -68,12 +60,13 @@ def expected_free_energy(df):
         np.ones(n_samples, dtype=int), Phi
     )
 
-    node_ids = df["node_id"].unique()
+    nodes_ids = np.arange(15) + 1
+
     rewards = dict()
     eig = dict()
     utility = dict()
 
-    for node_id in node_ids:
+    for node_id in nodes_ids:
         # Get trials for this node (equivalent to node.viable_trials)
         node_trials = df[df["node_id"] == node_id]
 
@@ -84,11 +77,11 @@ def expected_free_energy(df):
             if pd.isna(trial["z"]):
                 continue
 
-            z = 1 if trial["z"] else 0
+            trial_z = 1 if trial["z"] else 0
             if trial["y"] == True:
-                alpha[z] += 1
+                alpha[trial_z] += 1
             elif trial["y"] == False:
-                beta[z] += 1
+                beta[trial_z] += 1
 
         alpha = alpha[:, np.newaxis]
         beta = beta[:, np.newaxis]
@@ -119,7 +112,15 @@ def expected_free_energy(df):
         p_y = p_y[z, np.arange(n_samples)]
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
-        U = np.mean(y[1] - (1 - y[1]) + (1 - y[0]) - y[0])
+        gamma = 0.1
+        p_z = z.mean()
+        U = np.mean(
+            np.log(
+                p_z * np.exp(gamma * (y[1] - (1 - y[1])))
+                + (1 - p_z)
+                * np.exp(gamma * ((1 - y[0]) - y[0])),
+            )
+        )
 
         rewards[node_id] = EIG + U
         eig[node_id] = EIG
@@ -139,24 +140,25 @@ def expected_free_energy(df):
 full = pd.read_csv(
     "output/KnowledgeTrial_thompson_full.csv"
 )
-active_10 = pd.read_csv(
-    "output/KnowledgeTrial_active_10.csv"
+active_5 = pd.read_csv(
+    "output/KnowledgeTrial_active_5.csv"
 )
-random_10 = pd.read_csv(
-    "output/KnowledgeTrial_thompson_10_random.csv"
+random_5 = pd.read_csv(
+    "output/KnowledgeTrial_random_5.csv"
 )
-thompson_5 = pd.read_csv(
-    "output/KnowledgeTrial_thompson_5.csv"
-)
+# random_5 = active_5
+# thompson_5 = pd.read_csv(
+#     "output/KnowledgeTrial_thompson_5.csv"
+# )
 
 rewards_full, eig_full, utility_full = expected_free_energy(
     full
 )
-rewards_active_10, eig_active_10, utility_active_10 = (
-    expected_free_energy(active_10)
+rewards_active_5, eig_active_5, utility_active_5 = (
+    expected_free_energy(active_5)
 )
-rewards_random_10, eig_random_10, utility_random_10 = (
-    expected_free_energy(random_10)
+rewards_random_5, eig_random_5, utility_random_5 = (
+    expected_free_energy(random_5)
 )
 
 mean_reward = {
@@ -179,21 +181,21 @@ order = sorted(
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 nodes = list(mean_reward.keys())
-counts = (active_10.groupby("node_id")["id"].count())[nodes]
-rewards = np.array(list(mean_reward.values()))
-low_rewards = np.array(list(low_reward.values()))
-high_rewards = np.array(list(high_reward.values()))
-ax.scatter(rewards, counts)
-ax.errorbar(
-    rewards,
-    counts,
-    xerr=(rewards - low_rewards, high_rewards - rewards),
-    ls="none",
-    alpha=0.5,
-)
-ax.set_xlabel("$E[r_j]$ (Expected reward for $j$)")
-ax.set_ylabel("Number of trials $n_j$")
-plt.show()
+# counts = (active_5.groupby("node_id")["id"].count())[nodes]
+# rewards = np.array(list(mean_reward.values()))
+# low_rewards = np.array(list(low_reward.values()))
+# high_rewards = np.array(list(high_reward.values()))
+# ax.scatter(rewards, counts)
+# ax.errorbar(
+#     rewards,
+#     counts,
+#     xerr=(rewards - low_rewards, high_rewards - rewards),
+#     ls="none",
+#     alpha=0.5,
+# )
+# ax.set_xlabel("$E[r_j]$ (Expected reward for $j$)")
+# ax.set_ylabel("Number of trials $n_j$")
+# plt.show()
 
 
 def cumulative_frequency(df, output):
@@ -218,16 +220,14 @@ def cumulative_frequency(df, output):
 
     # Create a ScalarMappable for the colorbar
     norm = plt.Normalize(
-        vmin=0, vmax=np.max(list(mean_reward.values()))
+        vmin=np.min(list(mean_reward.values())),
+        vmax=np.max(list(mean_reward.values())),
     )
     sm = cm.ScalarMappable(norm=norm, cmap=cmap)
     sm.set_array([])  # Required for ScalarMappable
 
     for node in unique_nodes:
-        color = cmap(
-            mean_reward[node]
-            / np.max(list(mean_reward.values()))
-        )
+        color = cmap(norm(mean_reward[node]))
         ax.plot(cumulative_data[node], color=color)
 
     ax.set_xlabel("Step $t$")
@@ -249,20 +249,20 @@ def cumulative_frequency(df, output):
 
 
 cumulative_frequency(
-    active_10, "output/cumulative_node_frequency.pdf"
+    active_5, "output/cumulative_node_frequency.pdf"
 )
 cumulative_frequency(
-    random_10, "output/cumulative_node_frequency_random.pdf"
+    random_5, "output/cumulative_node_frequency_random.pdf"
 )
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
-mean_reward_active_10 = {
-    node: np.mean(rewards_active_10[node])
-    for node in rewards_active_10.keys()
+mean_reward_active_5 = {
+    node: np.mean(rewards_active_5[node])
+    for node in rewards_active_5.keys()
 }
-mean_reward_random_10 = {
-    node: np.mean(rewards_random_10[node])
-    for node in rewards_random_10.keys()
+mean_reward_random_5 = {
+    node: np.mean(rewards_random_5[node])
+    for node in rewards_random_5.keys()
 }
 
 nodes = rewards_full.keys()
@@ -274,26 +274,26 @@ def get_rank(r, nodes):
 
 
 ranks_full = get_rank(mean_reward, nodes)
-ranks_active_10 = get_rank(mean_reward_active_10, nodes)
-ranks_random_10 = get_rank(mean_reward_random_10, nodes)
+ranks_active_5 = get_rank(mean_reward_active_5, nodes)
+ranks_random_5 = get_rank(mean_reward_random_5, nodes)
 
 print("Active:")
-print(mean_reward_active_10)
+print(mean_reward_active_5)
 print("Random:")
-print(mean_reward_random_10)
+print(mean_reward_random_5)
 
 ax.plot([1, 15], [1, 15], color="black", zorder=0)
 ax.scatter(
-    ranks_full, ranks_active_10, label="Active inference"
+    ranks_full, ranks_active_5, label="Active inference"
 )
 ax.scatter(
-    ranks_full, ranks_random_10, label="Even sampling", s=4
+    ranks_full, ranks_random_5, label="Even sampling", s=4
 )
 # ax.scatter(
-#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_active_10[node] for node in mean_reward.keys()], label="Active inference"
+#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_active_5[node] for node in mean_reward.keys()], label="Active inference"
 # )
 # ax.scatter(
-#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_random_10[node] for node in mean_reward.keys()], label="Even sampling", s=4
+#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_random_5[node] for node in mean_reward.keys()], label="Even sampling", s=4
 # )
 ax.set_xlabel("Treatment rank\nin the greedy setup")
 ax.set_ylabel("Estimated treatment rank")
@@ -484,6 +484,11 @@ def plot_y_distributions_by_z(df, mean_reward):
         else:
             ax.tick_params(labelbottom=False)
 
+        if i // 5 == 1 and i % 5 == 0:
+            ax.set_ylabel(
+                "Correct answer probability\n$P(y_{j}=1|z)$"
+            )
+
     fig.legend(
         loc="upper right",
         fontsize=8,
@@ -502,12 +507,12 @@ def plot_y_distributions_by_z(df, mean_reward):
     return fig, axes
 
 
-plot_y_distributions_by_z(active_10, mean_reward_active_10)
+plot_y_distributions_by_z(active_5, mean_reward_active_5)
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 df = pd.read_csv("output/utility.csv")
-df.columns = ["efe", "eig", "r"]
+df.columns = ["efe", "eig", "r", "p"]
 
 ax.fill_between(
     np.arange(len(df)),
