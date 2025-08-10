@@ -140,12 +140,8 @@ def expected_free_energy(df):
 full = pd.read_csv(
     "output/KnowledgeTrial_thompson_full.csv"
 )
-active_5 = pd.read_csv(
-    "output/KnowledgeTrial_active_5.csv"
-)
-random_5 = pd.read_csv(
-    "output/KnowledgeTrial_random_5.csv"
-)
+active_5 = pd.read_csv("output/KnowledgeTrial_active_5.csv")
+random_5 = pd.read_csv("output/KnowledgeTrial_random_5.csv")
 # random_5 = active_5
 # thompson_5 = pd.read_csv(
 #     "output/KnowledgeTrial_thompson_5.csv"
@@ -243,16 +239,19 @@ def cumulative_frequency(df, output):
         labelpad=15,
     )
     fig.savefig(
-        output,
+        f"{output}.pdf",
         bbox_inches="tight",
+    )
+    fig.savefig(
+        f"{output}.png", bbox_inches="tight", dpi=300
     )
 
 
 cumulative_frequency(
-    active_5, "output/cumulative_node_frequency.pdf"
+    active_5, "output/cumulative_node_frequency"
 )
 cumulative_frequency(
-    random_5, "output/cumulative_node_frequency_random.pdf"
+    random_5, "output/cumulative_node_frequency_random"
 )
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
@@ -503,6 +502,11 @@ def plot_y_distributions_by_z(df, mean_reward):
     plt.savefig(
         "output/posteriors.pdf", bbox_inches="tight"
     )
+    plt.savefig(
+        "output/posteriors.png",
+        bbox_inches="tight",
+        dpi=300,
+    )
 
     return fig, axes
 
@@ -540,3 +544,4 @@ fig.legend(
 )
 
 fig.savefig("output/efe.pdf", bbox_inches="tight")
+fig.savefig("output/efe.png", bbox_inches="tight", dpi=300)
