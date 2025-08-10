@@ -1,4 +1,4 @@
-# Adaptive Bayesian testing with PsyNet
+# Active inference for real-time adaptive testing with PsyNet
 
 This experiment implements real-time adaptive testing using active inference in PsyNet.
 
