@@ -20,9 +20,9 @@ The optimal challenge to present to each participant is evaluated at every step 
 gain using variational inference methods for efficient computation.
 We achieve a 33% reduction in the tests administered with negligible information loss in a simulation based on real human data.
 
-|          Trials per participant         |  Accuracy of adaptive design versus the oracle (static) |
-|:---------------------------------------:|:--------------------------------------------------------:|
-| ![](output/trials_per_participant.png) |  ![](output/theta_comparison.png)                       |
+| Trials per participant throughout the experiment |  Accuracy of adaptive design versus the oracle (static) |
+|:------------------------------------------------:|:--------------------------------------------------------:|
+|      ![](output/trials_per_participant.png)      |  ![](output/theta_comparison.png)                       |
 
 ## Experiment 2 (branch: active-inference)
 
@@ -32,6 +32,13 @@ In our case, we seek the trivia questions that are most associated with the educ
 We again appeal to active inference, which naturally combines information-seeking with extrinsic/utilitarian
 motivations. Active inference naturally "resolves" the exploration/exploitation trade-off without any ad-hoc mechanism,
 which makes it an attractive alternative to traditional RL and Bayesian learning approaches.
+
+
+| Cumulative frequency of treatments administered as a function of the treatments performance (darkblue is better, lightblue is worse) | Contribution of exploration and exploitation to the expected free energy |
+|:------------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------------------------:|
+|                                              ![](output/cumulative_node_frequency.png)                                               |                           ![](output/efe.png)                            |
+
+![](output/posteriors.png)
 
 # PsyNet
 
