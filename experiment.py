@@ -296,22 +296,19 @@ class ActiveInference:
         items = []
         responses = []
 
-        for network_id, trials in data["networks"].items():
+        for node_id, trials in data["nodes"].items():
             for trial_id, trial_data in trials.items():
                 participants.append(trial_data["participant_id"])
-                items.append(network_id)
+                items.append(node_id)
                 responses.append(float(trial_data["y"]))
-
-            logger.info(responses)
 
         self.participant_index = {
             participant: idx
             for idx, participant in enumerate(data["participants"])
         }
         self.item_index = {
-            item: idx for idx, item in enumerate(data["networks"].keys())
+            item: idx for idx, item in enumerate(data["nodes"].keys())
         }
-        logger.info(self.item_index)
 
         participants = torch.tensor(
             [
@@ -330,9 +327,6 @@ class ActiveInference:
             len(self.participant_index),
             len(self.item_index),
         )
-
-        logger.info("theta")
-        logger.info(self.theta_means.shape)
 
         pyro.clear_param_store()
 
@@ -585,19 +579,17 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return nodes
 
     def prior_data(self, experiment):
-        data = {"networks": dict(), "participants": []}
+        data = {"nodes": dict(), "participants": []}
 
-        networks = self.network_class.query.filter_by(
-            trial_maker_id=self.id, full=False, failed=False
-        )
+        nodes = self.node_class.query.filter_by(trial_maker_id=self.id)
 
-        for network in networks:
-            data["networks"][network.id] = dict()
+        for node in nodes:
+            data["nodes"][node.id] = dict()
 
-            for trial in network.head.viable_trials:
+            for trial in node.viable_trials:
                 y = trial.get_y()
 
-                data["networks"][network.id][trial.id] = {
+                data["nodes"][node.id][trial.id] = {
                     "y": y,
                     "participant_id": trial.participant.id,
                 }
@@ -608,18 +600,35 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return data
 
-    def prioritize_networks(self, networks, participant, experiment):
-        candidates = {network.id: network for network in networks}
+    def prioritize_nodes(self, nodes, participant, experiment):
+        candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
-        next_network = self.ai.get_optimal_test(
+        next_node = self.ai.get_optimal_test(
             list(candidates.keys()), participant, data
         )
 
-        if next_network is None:
+        if next_node is None:
             return []
 
-        return [candidates[next_network]]
+        return [candidates[next_node]]
+
+    def prioritize_networks(self, networks, participant, experiment):
+        nodes = [network.head for network in networks]
+        nodes = self.prioritize_nodes(nodes, participant, experiment)
+
+        # filter
+        networks = [
+            network
+            for network in networks
+            if network.head.id in [node.id for node in nodes]
+        ]
+
+        # re-order
+        order = [node.id for node in nodes]
+        networks = sorted(networks, key=lambda network: order.index(network.head.id))
+
+        return networks
 
     def finalize_trial(
         self,
