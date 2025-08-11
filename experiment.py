@@ -238,12 +238,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
-            gamma = 0.1
-            U = np.mean(
-                np.log(
-                    p_z * np.exp(gamma * (y[1] - (1 - y[1])))
-                    + (1 - p_z) * np.exp(gamma * ((1 - y[0]) - y[0])),
-                )
+            logger.info(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+
+            gamma = 0.2
+            U = gamma * np.mean(
+                p_z * y[1]
+                + (1 - p_z) * (1 - y[0])
+                - p_z * (1 - y[1])
+                - (1 - p_z) * y[0]
             )
 
             rewards[network_id] = EIG + U
@@ -327,8 +329,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return data
 
     def prioritize_networks(self, networks, participant, experiment):
-        return networks
-
         candidates = {network.id: network for network in networks}
 
         data = self.prior_data(experiment)
