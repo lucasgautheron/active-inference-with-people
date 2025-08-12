@@ -71,6 +71,127 @@ class Oracle:
 
 oracle = Oracle()
 
+class ActiveInference:
+    def get_optimal_node(self, nodes_ids, participant, data):
+        z_i = participant.var.z
+
+        n_samples = 1000
+
+        rewards = dict()
+        eig = dict()
+        utility = dict()
+
+        alphas = dict()
+        betas = dict()
+
+        z_participants = np.array(
+            [participant["z"] for participant in data["participants"].values()]
+        )
+
+        alpha_z = 1 + np.sum(z_participants == 1)
+        beta_z = 1 + np.sum(z_participants == 0)
+        p_z = alpha_z / (alpha_z + beta_z)
+
+        for node_id in nodes_ids:
+            alpha = np.ones(2)
+            beta = np.ones(2)
+
+            for trial_id, trial in data["networks"][node_id].items():
+                if trial["y"] == True:
+                    alpha[trial["z"]] += 1
+                elif trial["y"] == False:
+                    beta[trial["z"]] += 1
+
+            alphas[node_id] = alpha
+            betas[node_id] = beta
+
+            alpha = alpha[:, np.newaxis]
+            beta = beta[:, np.newaxis]
+
+            phi = np.random.beta(
+                alpha,
+                beta,
+                (2, n_samples),
+            )
+
+            y = np.random.binomial(
+                np.ones((2, n_samples), dtype=int),
+                phi,
+                size=(
+                    2,
+                    n_samples,
+                ),
+            )
+
+            p_y_given_phi = phi * y + (1 - phi) * (1 - y)
+            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
+
+            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+
+            logger.info(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+
+            gamma = 0.2
+            U = gamma * np.mean(
+                p_z * y[1]
+                + (1 - p_z) * (1 - y[0])
+                - p_z * (1 - y[1])
+                - (1 - p_z) * y[0]
+            )
+
+            rewards[node_id] = EIG + U
+            eig[node_id] = EIG
+            utility[node_id] = U
+
+        from matplotlib import pyplot as plt
+
+        if np.random.uniform() > 1 and len(nodes_ids) == 15:
+            cmap = plt.get_cmap("tab10")
+            fig, ax = plt.subplots()
+            for node_id in nodes_ids:
+                color = cmap(node_id % 10)
+                x = np.linspace(0, 1, 100)
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node_id][0],
+                        b=betas[node_id][0],
+                    ),
+                    color=color,
+                    label=rewards[node_id],
+                )
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node_id][1],
+                        b=betas[node_id][1],
+                    ),
+                    color=color,
+                    ls="dashed",
+                )
+            plt.legend()
+            plt.show()
+
+        best_network = sorted(
+            list(rewards.keys()),
+            key=lambda node_id: rewards[node_id],
+            reverse=True,
+        )[0]
+
+        if len(nodes_ids) == 15:
+            with open("output/utility.csv", "a", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(
+                    [
+                        rewards[best_network],
+                        eig[best_network],
+                        utility[best_network],
+                    ]
+                )
+
+        return best_network
+
 
 class KnowledgeTrial(StaticTrial):
     time_estimate = (
@@ -162,6 +283,8 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             nodes=nodes,
         )
 
+        self.ai = ActiveInference()
+
     def load_nodes(self):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
@@ -181,126 +304,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         ]
 
         return nodes
-
-    def get_optimal_treatment(self, networks_ids, participant, data):
-        z_i = participant.var.z
-
-        n_samples = 1000
-
-        rewards = dict()
-        eig = dict()
-        utility = dict()
-
-        alphas = dict()
-        betas = dict()
-
-        z_participants = np.array(
-            [participant["z"] for participant in data["participants"].values()]
-        )
-
-        alpha_z = 1 + np.sum(z_participants == 1)
-        beta_z = 1 + np.sum(z_participants == 0)
-        p_z = alpha_z / (alpha_z + beta_z)
-
-        for network_id in networks_ids:
-            alpha = np.ones(2)
-            beta = np.ones(2)
-
-            for trial_id, trial in data["networks"][network_id].items():
-                if trial["y"] == True:
-                    alpha[trial["z"]] += 1
-                elif trial["y"] == False:
-                    beta[trial["z"]] += 1
-
-            alphas[network_id] = alpha
-            betas[network_id] = beta
-
-            alpha = alpha[:, np.newaxis]
-            beta = beta[:, np.newaxis]
-
-            phi = np.random.beta(
-                alpha,
-                beta,
-                (2, n_samples),
-            )
-
-            y = np.random.binomial(
-                np.ones((2, n_samples), dtype=int),
-                phi,
-                size=(
-                    2,
-                    n_samples,
-                ),
-            )
-
-            p_y_given_phi = phi * y + (1 - phi) * (1 - y)
-            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
-
-            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
-
-            logger.info(np.log(p_y_given_phi[z_i] / p_y[z_i]))
-
-            gamma = 0.2
-            U = gamma * np.mean(
-                p_z * y[1]
-                + (1 - p_z) * (1 - y[0])
-                - p_z * (1 - y[1])
-                - (1 - p_z) * y[0]
-            )
-
-            rewards[network_id] = EIG + U
-            eig[network_id] = EIG
-            utility[network_id] = U
-
-        from matplotlib import pyplot as plt
-
-        if np.random.uniform() > 1 and len(networks_ids) == 15:
-            cmap = plt.get_cmap("tab10")
-            fig, ax = plt.subplots()
-            for network_id in networks_ids:
-                color = cmap(network_id % 10)
-                x = np.linspace(0, 1, 100)
-                ax.plot(
-                    x,
-                    beta_dist.pdf(
-                        x,
-                        a=alphas[network_id][0],
-                        b=betas[network_id][0],
-                    ),
-                    color=color,
-                    label=rewards[network_id],
-                )
-                ax.plot(
-                    x,
-                    beta_dist.pdf(
-                        x,
-                        a=alphas[network_id][1],
-                        b=betas[network_id][1],
-                    ),
-                    color=color,
-                    ls="dashed",
-                )
-            plt.legend()
-            plt.show()
-
-        best_network = sorted(
-            list(rewards.keys()),
-            key=lambda network_id: rewards[network_id],
-            reverse=True,
-        )[0]
-
-        if len(networks_ids) == 15:
-            with open("output/utility.csv", "a", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow(
-                    [
-                        rewards[best_network],
-                        eig[best_network],
-                        utility[best_network],
-                    ]
-                )
-
-        return best_network
 
     def prior_data(self, experiment):
         data = {"networks": dict(), "participants": dict()}
@@ -328,16 +331,35 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return data
 
-    def prioritize_networks(self, networks, participant, experiment):
-        candidates = {network.id: network for network in networks}
+    def prioritize_nodes(self, nodes, participant, experiment):
+        candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
-
-        next_network = self.get_optimal_treatment(
+        next_node = self.ai.get_optimal_node(
             list(candidates.keys()), participant, data
         )
 
-        return [candidates[next_network]]
+        if next_node is None:
+            return []
+
+        return [candidates[next_node]]
+
+    def prioritize_networks(self, networks, participant, experiment):
+        nodes = [network.head for network in networks]
+        nodes = self.prioritize_nodes(nodes, participant, experiment)
+
+        # filter
+        networks = [
+            network
+            for network in networks
+            if network.head.id in [node.id for node in nodes]
+        ]
+
+        # re-order
+        order = [node.id for node in nodes]
+        networks = sorted(networks, key=lambda network: order.index(network.head.id))
+
+        return networks
 
     def finalize_trial(
         self,
