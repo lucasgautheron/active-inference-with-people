@@ -357,7 +357,7 @@ class ActiveInference:
 
         logger.debug("Posterior update completed")
 
-    def get_optimal_test(self, candidates, participant, data):
+    def get_optimal_node(self, candidates, participant, data):
         # Update posterior with current data
         self.update_posterior(data)
 
@@ -604,7 +604,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
-        next_node = self.ai.get_optimal_test(
+        next_node = self.ai.get_optimal_node(
             list(candidates.keys()), participant, data
         )
 
