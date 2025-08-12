@@ -112,14 +112,13 @@ def expected_free_energy(df):
         p_y = p_y[z, np.arange(n_samples)]
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
-        gamma = 0.1
         p_z = z.mean()
-        U = np.mean(
-            np.log(
-                p_z * np.exp(gamma * (y[1] - (1 - y[1])))
-                + (1 - p_z)
-                * np.exp(gamma * ((1 - y[0]) - y[0])),
-            )
+        gamma = 0.2
+        U = gamma * np.mean(
+            p_z * y[1]
+            + (1 - p_z) * (1 - y[0])
+            - p_z * (1 - y[1])
+            - (1 - p_z) * y[0]
         )
 
         rewards[node_id] = EIG + U
@@ -516,7 +515,7 @@ plot_y_distributions_by_z(active_5, mean_reward_active_5)
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 df = pd.read_csv("output/utility.csv")
-df.columns = ["efe", "eig", "r", "p"]
+df.columns = ["efe", "eig", "r"]
 
 ax.fill_between(
     np.arange(len(df)),
