@@ -79,8 +79,6 @@ oracle = Oracle(domain=0)
 
 
 class AdaptiveTesting:
-    """Adaptive Bayesian Learner"""
-
     def __init__(self):
         logger.debug("Initializing adaptive learner.")
 
@@ -553,13 +551,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         super().__init__(
             *args,
-            # number questions administered
-            # to each participant (estimate)
-            expected_trials_per_participant=15,
-            # number of questions administered
-            # to each participant (maximum)
-            max_trials_per_participant=15,
-            # can the same question be shown multiple times?
             allow_repeated_nodes=False,
             # the class of the trials delivered
             trial_class=KnowledgeTrial,
@@ -840,12 +831,16 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=ActiveInference,
             domain=0,
             z_attribute=True,
+            expected_trials_per_participant=5,
+            max_trials_per_participant=5,
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
             optimizer_class=AdaptiveTesting,
             domain=0,
             z_attribute=False,
+            expected_trials_per_participant=15,
+            max_trials_per_participant=15,
         ),
         SuccessfulEndPage(),
     )
