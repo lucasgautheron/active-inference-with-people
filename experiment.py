@@ -34,12 +34,13 @@ from scipy.stats import norm
 import pandas as pd
 import csv
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 logger = logging.getLogger()
+
 
 class Oracle:
     """
@@ -49,7 +50,7 @@ class Oracle:
 
     def __init__(self, domain):
         answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[domain*15:, :(domain+1)*15]
+        answers = np.stack(answers.values)[domain * 15 :, : (domain + 1) * 15]
         mask = ~np.any(pd.isna(answers), axis=1)
         answers = answers[mask]
 
@@ -72,6 +73,7 @@ class Oracle:
 
     def college(self, participant_id: int):
         return self.education[participant_id]
+
 
 oracle = Oracle(domain=0)
 
@@ -501,9 +503,6 @@ class KnowledgeTrial(StaticTrial):
         # Keeps track of whether the participant correctly answered
         self.var.y = None
 
-    def get_y(self):
-        return self.var.y
-
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
 
@@ -538,12 +537,19 @@ class KnowledgeTrial(StaticTrial):
 
 
 class KnowledgeTrialMaker(StaticTrialMaker):
-    def __init__(self, optimizer_class, knowledge_domain, *args, **kwargs):
+    def __init__(
+        self,
+        optimizer_class,
+        domain,
+        z_attribute,
+        *args,
+        **kwargs,
+    ):
         """
         Initialize the trial maker
         with the list of all possibles challenges
         """
-        nodes = self.load_nodes(knowledge_domain)
+        nodes = self.load_nodes(domain)
 
         super().__init__(
             *args,
@@ -567,11 +573,13 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         logger.info("Initializing optimization module.")
         self.optimizer = optimizer_class()
+        self.z_attribute = z_attribute
 
     def load_nodes(self, domain):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
         questions = questions[questions["domain"] == domain]
+        logger.info(questions)
 
         nodes = [
             StaticNode(
@@ -589,24 +597,39 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return nodes
 
     def prior_data(self, experiment):
-        data = {"nodes": dict(), "participants": []}
+        data = {"nodes": dict(), "participants": dict()}
 
-        nodes = self.node_class.query.filter_by(trial_maker_id=self.id)
+        nodes = self.network_class.query.filter_by(
+            trial_maker_id=self.id, full=False, failed=False
+        )
 
         for node in nodes:
             data["nodes"][node.id] = dict()
 
-            for trial in node.viable_trials:
-                y = trial.get_y()
+            for trial in node.head.viable_trials:
+                y = trial.var.get("y")
+                z = (
+                    trial.participant.var.get("z", None)
+                    if self.z_attribute
+                    else None
+                )
 
                 data["nodes"][node.id][trial.id] = {
                     "y": y,
+                    "z": z,
                     "participant_id": trial.participant.id,
                 }
 
-        data["participants"] = [
-            participant.id for participant in Participant.query.all()
-        ]
+        data["participants"] = {
+            participant.id: {
+                "z": (
+                    participant.var.get("z", None) if self.z_attribute else None
+                ),
+            }
+            for participant in Participant.query.all()
+        }
+
+        logger.info(data["participants"])
 
         return data
 
@@ -673,7 +696,11 @@ class ActiveInference:
         betas = dict()
 
         z_participants = np.array(
-            [participant["z"] for participant in data["participants"].values()]
+            [
+                data["participants"][participant_id]["z"]
+                for participant_id in data["participants"]
+                if data["participants"][participant_id]["z"] != None
+            ]
         )
 
         alpha_z = 1 + np.sum(z_participants == 1)
@@ -684,7 +711,7 @@ class ActiveInference:
             alpha = np.ones(2)
             beta = np.ones(2)
 
-            for trial_id, trial in data["networks"][node_id].items():
+            for trial_id, trial in data["nodes"][node_id].items():
                 if trial["y"] == True:
                     alpha[trial["z"]] += 1
                 elif trial["y"] == False:
@@ -768,6 +795,7 @@ class ActiveInference:
         )[0]
 
         if len(nodes_ids) == 15:
+            logger.info("Saving")
             with open("output/utility.csv", "a", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(
@@ -810,12 +838,14 @@ class Exp(psynet.experiment.Experiment):
         KnowledgeTrialMaker(
             id_="optimal_treatment",
             optimizer_class=ActiveInference,
-            knowledge_domain=1,
+            domain=0,
+            z_attribute=True,
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
             optimizer_class=AdaptiveTesting,
-            knowledge_domain=0,
+            domain=0,
+            z_attribute=False,
         ),
         SuccessfulEndPage(),
     )
