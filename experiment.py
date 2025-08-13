@@ -7,7 +7,7 @@ from markupsafe import Markup
 import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import Timeline
+from psynet.timeline import Timeline, CodeBlock
 from psynet.participant import Participant
 from psynet.trial.static import (
     StaticNode,
@@ -16,8 +16,7 @@ from psynet.trial.static import (
 )
 from psynet.consent import MainConsent
 from psynet.demography.general import (
-    BasicDemography,
-    Income,
+    FormalEducation,
 )
 
 import torch
@@ -33,14 +32,14 @@ from matplotlib import pyplot as plt
 from scipy.stats import norm
 
 import pandas as pd
+import csv
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 logger = logging.getLogger()
-
 
 class Oracle:
     """
@@ -48,10 +47,11 @@ class Oracle:
     using real human data from Dubourg et al., 2025
     """
 
-    def __init__(self):
+    def __init__(self, domain):
         answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[:, :15]
-        answers = answers[~np.any(pd.isna(answers), axis=1)]
+        answers = np.stack(answers.values)[domain*15:, :(domain+1)*15]
+        mask = ~np.any(pd.isna(answers), axis=1)
+        answers = answers[mask]
 
         self.answers = [
             {
@@ -60,17 +60,26 @@ class Oracle:
             for i in range(len(answers))
         ]
 
+        self.education = pd.read_csv("static/education.csv")["college"].values[
+            mask
+        ]
+
+        logger.info("Oracle data:")
+        logger.info(answers.shape)
+
     def answer(self, participant_id: int, item: int):
         return self.answers[participant_id]["answers"][item]
 
+    def college(self, participant_id: int):
+        return self.education[participant_id]
 
-oracle = Oracle()
+oracle = Oracle(domain=0)
 
 
-class ActiveInference:
+class AdaptiveTesting:
     """Adaptive Bayesian Learner"""
 
-    def __init__(self, num_items):
+    def __init__(self):
         logger.debug("Initializing adaptive learner.")
 
         # Priors parameters
@@ -529,15 +538,15 @@ class KnowledgeTrial(StaticTrial):
 
 
 class KnowledgeTrialMaker(StaticTrialMaker):
-    def __init__(self, *args, **kwargs):
+    def __init__(self, optimizer_class, knowledge_domain, *args, **kwargs):
         """
         Initialize the trial maker
         with the list of all possibles challenges
         """
-        nodes = self.load_nodes()
+        nodes = self.load_nodes(knowledge_domain)
 
         super().__init__(
-            id_="knowledge",
+            *args,
             # number questions administered
             # to each participant (estimate)
             expected_trials_per_participant=15,
@@ -553,15 +562,16 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             n_repeat_trials=0,
             # the list of all challenges
             nodes=nodes,
+            **kwargs,
         )
 
-        logger.info("Initializing adaptive learner.")
-        self.ai = ActiveInference(len(nodes))
+        logger.info("Initializing optimization module.")
+        self.optimizer = optimizer_class()
 
-    def load_nodes(self):
+    def load_nodes(self, domain):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
-        questions = questions[questions["domain"] == 0]
+        questions = questions[questions["domain"] == domain]
 
         nodes = [
             StaticNode(
@@ -604,7 +614,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
-        next_node = self.ai.get_optimal_node(
+        next_node = self.optimizer.get_optimal_node(
             list(candidates.keys()), participant, data
         )
 
@@ -626,7 +636,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # re-order
         order = [node.id for node in nodes]
-        networks = sorted(networks, key=lambda network: order.index(network.head.id))
+        networks = sorted(
+            networks, key=lambda network: order.index(network.head.id)
+        )
 
         return networks
 
@@ -647,15 +659,163 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
 
 
+class ActiveInference:
+    def get_optimal_node(self, nodes_ids, participant, data):
+        z_i = participant.var.z
+
+        n_samples = 1000
+
+        rewards = dict()
+        eig = dict()
+        utility = dict()
+
+        alphas = dict()
+        betas = dict()
+
+        z_participants = np.array(
+            [participant["z"] for participant in data["participants"].values()]
+        )
+
+        alpha_z = 1 + np.sum(z_participants == 1)
+        beta_z = 1 + np.sum(z_participants == 0)
+        p_z = alpha_z / (alpha_z + beta_z)
+
+        for node_id in nodes_ids:
+            alpha = np.ones(2)
+            beta = np.ones(2)
+
+            for trial_id, trial in data["networks"][node_id].items():
+                if trial["y"] == True:
+                    alpha[trial["z"]] += 1
+                elif trial["y"] == False:
+                    beta[trial["z"]] += 1
+
+            alphas[node_id] = alpha
+            betas[node_id] = beta
+
+            alpha = alpha[:, np.newaxis]
+            beta = beta[:, np.newaxis]
+
+            phi = np.random.beta(
+                alpha,
+                beta,
+                (2, n_samples),
+            )
+
+            y = np.random.binomial(
+                np.ones((2, n_samples), dtype=int),
+                phi,
+                size=(
+                    2,
+                    n_samples,
+                ),
+            )
+
+            p_y_given_phi = phi * y + (1 - phi) * (1 - y)
+            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
+
+            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+
+            logger.info(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+
+            gamma = 0.2
+            U = gamma * np.mean(
+                p_z * y[1]
+                + (1 - p_z) * (1 - y[0])
+                - p_z * (1 - y[1])
+                - (1 - p_z) * y[0]
+            )
+
+            rewards[node_id] = EIG + U
+            eig[node_id] = EIG
+            utility[node_id] = U
+
+        from matplotlib import pyplot as plt
+
+        if np.random.uniform() > 1 and len(nodes_ids) == 15:
+            cmap = plt.get_cmap("tab10")
+            fig, ax = plt.subplots()
+            for node_id in nodes_ids:
+                color = cmap(node_id % 10)
+                x = np.linspace(0, 1, 100)
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node_id][0],
+                        b=betas[node_id][0],
+                    ),
+                    color=color,
+                    label=rewards[node_id],
+                )
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node_id][1],
+                        b=betas[node_id][1],
+                    ),
+                    color=color,
+                    ls="dashed",
+                )
+            plt.legend()
+            plt.show()
+
+        best_network = sorted(
+            list(rewards.keys()),
+            key=lambda node_id: rewards[node_id],
+            reverse=True,
+        )[0]
+
+        if len(nodes_ids) == 15:
+            with open("output/utility.csv", "a", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(
+                    [
+                        rewards[best_network],
+                        eig[best_network],
+                        utility[best_network],
+                    ]
+                )
+
+        return best_network
+
+
 class Exp(psynet.experiment.Experiment):
-    label = "Adaptive Bayesian testing demo"
+    label = "Active inference for adaptive experiments"
     initial_recruitment_size = 1
     test_n_bots = 200
     test_mode = "serial"
 
     timeline = Timeline(
         MainConsent(),
-        BasicDemography(),
-        KnowledgeTrialMaker(),
+        FormalEducation(),
+        CodeBlock(
+            lambda participant: participant.var.set(
+                "z",
+                (
+                    oracle.college(participant.id)
+                    if DEBUG_MODE
+                    else (
+                        participant.answer
+                        in [
+                            "college",
+                            "graduate_school",
+                            "postgraduate_degree_or_higher",
+                        ]
+                    )
+                ),
+            )
+        ),
+        KnowledgeTrialMaker(
+            id_="optimal_treatment",
+            optimizer_class=ActiveInference,
+            knowledge_domain=1,
+        ),
+        KnowledgeTrialMaker(
+            id_="optimal_test",
+            optimizer_class=AdaptiveTesting,
+            knowledge_domain=0,
+        ),
         SuccessfulEndPage(),
     )
