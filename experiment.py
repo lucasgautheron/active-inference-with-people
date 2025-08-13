@@ -96,7 +96,7 @@ class ActiveInference:
             alpha = np.ones(2)
             beta = np.ones(2)
 
-            for trial_id, trial in data["networks"][node_id].items():
+            for trial_id, trial in data["nodes"][node_id].items():
                 if trial["y"] == True:
                     alpha[trial["z"]] += 1
                 elif trial["y"] == False:
@@ -306,19 +306,19 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return nodes
 
     def prior_data(self, experiment):
-        data = {"networks": dict(), "participants": dict()}
+        data = {"nodes": dict(), "participants": dict()}
 
-        networks = self.network_class.query.filter_by(
+        nodes = self.network_class.query.filter_by(
             trial_maker_id=self.id, full=False, failed=False
         )
 
-        for network in networks:
-            data["networks"][network.id] = dict()
+        for node in nodes:
+            data["nodes"][node.id] = dict()
 
-            for trial in network.head.viable_trials:
+            for trial in node.head.viable_trials:
                 y = trial.get_y()
 
-                data["networks"][network.id][trial.id] = {
+                data["nodes"][node.id][trial.id] = {
                     "y": y,
                     "z": trial.participant.var.z,
                     "participant_id": trial.participant.id,
