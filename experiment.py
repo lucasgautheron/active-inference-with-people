@@ -7,7 +7,7 @@ from markupsafe import Markup
 import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import Timeline
+from psynet.timeline import Timeline, CodeBlock
 from psynet.participant import Participant
 from psynet.trial.static import (
     StaticNode,
@@ -16,8 +16,7 @@ from psynet.trial.static import (
 )
 from psynet.consent import MainConsent
 from psynet.demography.general import (
-    BasicDemography,
-    Income,
+    FormalEducation,
 )
 
 import torch
@@ -33,6 +32,7 @@ from matplotlib import pyplot as plt
 from scipy.stats import norm
 
 import pandas as pd
+import csv
 
 DEBUG_MODE = True
 
@@ -48,10 +48,11 @@ class Oracle:
     using real human data from Dubourg et al., 2025
     """
 
-    def __init__(self):
+    def __init__(self, domain):
         answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[:, :15]
-        answers = answers[~np.any(pd.isna(answers), axis=1)]
+        answers = np.stack(answers.values)[domain * 15 :, : (domain + 1) * 15]
+        mask = ~np.any(pd.isna(answers), axis=1)
+        answers = answers[mask]
 
         self.answers = [
             {
@@ -60,17 +61,25 @@ class Oracle:
             for i in range(len(answers))
         ]
 
+        self.education = pd.read_csv("static/education.csv")["college"].values[
+            mask
+        ]
+
+        logger.info("Oracle data:")
+        logger.info(answers.shape)
+
     def answer(self, participant_id: int, item: int):
         return self.answers[participant_id]["answers"][item]
 
+    def college(self, participant_id: int):
+        return self.education[participant_id]
 
-oracle = Oracle()
+
+oracle = Oracle(domain=0)
 
 
-class ActiveInference:
-    """Adaptive Bayesian Learner"""
-
-    def __init__(self, num_items):
+class AdaptiveTesting:
+    def __init__(self):
         logger.debug("Initializing adaptive learner.")
 
         # Priors parameters
@@ -98,42 +107,43 @@ class ActiveInference:
         that takes item indices as design"""
 
         def model(design):
-            # Sample ability parameter for the target participant
-            theta = pyro.sample(
-                "theta",
-                dist.Normal(
-                    self.theta_means[target_participant],
-                    self.theta_sds[target_participant],
-                ),
-            )
-            theta = theta.unsqueeze(-1)
+            with pyro.plate_stack("plate", design.shape[:-1]):
+                # Sample ability parameter for the target participant
+                theta = pyro.sample(
+                    "theta",
+                    dist.Normal(
+                        self.theta_means[target_participant],
+                        self.theta_sds[target_participant],
+                    ),
+                )
+                theta = theta.unsqueeze(-1)
 
-            item_idx = design.squeeze(-1).long()
-            difficulties = pyro.sample(
-                "difficulties",
-                dist.Normal(
-                    self.difficulty_means[item_idx],
-                    self.difficulty_sds[item_idx],
-                ),
-            ).unsqueeze(-1)
+                item_idx = design.squeeze(-1).long()
+                difficulties = pyro.sample(
+                    "difficulties",
+                    dist.Normal(
+                        self.difficulty_means[item_idx],
+                        self.difficulty_sds[item_idx],
+                    ),
+                ).unsqueeze(-1)
 
-            intercept = pyro.sample(
-                "intercept",
-                dist.Normal(
-                    self.intercept_mean,
-                    self.intercept_sd,
-                ),
-            ).unsqueeze(-1)
-            logit_p = (theta - difficulties) + intercept
+                intercept = pyro.sample(
+                    "intercept",
+                    dist.Normal(
+                        self.intercept_mean,
+                        self.intercept_sd,
+                    ),
+                ).unsqueeze(-1)
+                logit_p = (theta - difficulties) + intercept
 
-            y = pyro.sample(
-                "y",
-                dist.Bernoulli(
-                    logits=logit_p,
-                ).to_event(1),
-            )
+                y = pyro.sample(
+                    "y",
+                    dist.Bernoulli(
+                        logits=logit_p,
+                    ).to_event(1),
+                )
 
-            return y
+                return y
 
         return model
 
@@ -403,7 +413,9 @@ class ActiveInference:
         p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
         entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
 
-        if best_eig < 0.02 and np.max(entropy) < 0.7:
+        epsilon = 0.05
+        delta = 1
+        if best_eig < epsilon and np.max(entropy) < delta:
             logger.debug("Stopping criteria met - low EIG and entropy")
             return None
 
@@ -415,12 +427,14 @@ class ActiveInference:
                 scale=self.theta_sds[self.participant_index[participant.id]],
             )
 
-            plt.plot(x, y, label="Participant ability")
+            plt.plot(x, y, color="black", label=r"$\theta$(participant)")
+
+            eig = eig.detach().numpy()
 
             cmap = plt.get_cmap("tab10")
             for i in range(len(candidates)):
                 item = candidates[i]
-                color = cmap(i)
+                color = cmap(i % 10)
                 y = norm.pdf(
                     x,
                     loc=self.difficulty_means[self.item_index[item]]
@@ -433,7 +447,6 @@ class ActiveInference:
                 plt.plot(
                     x,
                     y,
-                    label="Item difficulty",
                     alpha=0.2,
                     color=color,
                 )
@@ -442,8 +455,11 @@ class ActiveInference:
                         self.difficulty_means[self.item_index[item]]
                         - self.intercept_mean,
                     ],
-                    [eig.detach()[i]],
-                    color=color,
+                    [eig[i]],
+                    facecolors="none",
+                    edgecolors=color,
+                    marker="s",
+                    label="EIG" if i == 0 else None,
                 )
 
                 plt.scatter(
@@ -452,11 +468,15 @@ class ActiveInference:
                         - self.intercept_mean,
                     ],
                     [entropy[i]],
-                    color="black",
+                    color=color,
+                    label="$H(y)$" if i == 0 else None,
                 )
-                plt.xlim(-3, 3)
-                plt.ylim(0, 1)
 
+            plt.axhline(epsilon, label=r"$\varepsilon$")
+            plt.xlim(-3, 3)
+            plt.ylim(0, 1)
+
+            plt.legend()
             plt.savefig(
                 "output/test_{}.png".format(participant.id),
             )
@@ -492,9 +512,6 @@ class KnowledgeTrial(StaticTrial):
         # Keeps track of whether the participant correctly answered
         self.var.y = None
 
-    def get_y(self):
-        return self.var.y
-
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
 
@@ -529,22 +546,22 @@ class KnowledgeTrial(StaticTrial):
 
 
 class KnowledgeTrialMaker(StaticTrialMaker):
-    def __init__(self, *args, **kwargs):
+    def __init__(
+        self,
+        optimizer_class,
+        domain,
+        z_attribute,
+        *args,
+        **kwargs,
+    ):
         """
         Initialize the trial maker
         with the list of all possibles challenges
         """
-        nodes = self.load_nodes()
+        nodes = self.load_nodes(domain)
 
         super().__init__(
-            id_="knowledge",
-            # number questions administered
-            # to each participant (estimate)
-            expected_trials_per_participant=15,
-            # number of questions administered
-            # to each participant (maximum)
-            max_trials_per_participant=15,
-            # can the same question be shown multiple times?
+            *args,
             allow_repeated_nodes=False,
             # the class of the trials delivered
             trial_class=KnowledgeTrial,
@@ -553,15 +570,18 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             n_repeat_trials=0,
             # the list of all challenges
             nodes=nodes,
+            **kwargs,
         )
 
-        logger.info("Initializing adaptive learner.")
-        self.ai = ActiveInference(len(nodes))
+        logger.info("Initializing optimization module.")
+        self.optimizer = optimizer_class()
+        self.z_attribute = z_attribute
 
-    def load_nodes(self):
+    def load_nodes(self, domain):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
-        questions = questions[questions["domain"] == 0]
+        questions = questions[questions["domain"] == domain]
+        logger.info(questions)
 
         nodes = [
             StaticNode(
@@ -579,24 +599,37 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return nodes
 
     def prior_data(self, experiment):
-        data = {"nodes": dict(), "participants": []}
+        data = {"nodes": dict(), "participants": dict()}
 
-        nodes = self.node_class.query.filter_by(trial_maker_id=self.id)
+        nodes = self.network_class.query.filter_by(
+            trial_maker_id=self.id, full=False, failed=False
+        )
 
         for node in nodes:
             data["nodes"][node.id] = dict()
 
-            for trial in node.viable_trials:
-                y = trial.get_y()
+            for trial in node.head.viable_trials:
+                y = trial.var.get("y")
+                z = (
+                    trial.participant.var.get("z", None)
+                    if self.z_attribute
+                    else None
+                )
 
                 data["nodes"][node.id][trial.id] = {
                     "y": y,
+                    "z": z,
                     "participant_id": trial.participant.id,
                 }
 
-        data["participants"] = [
-            participant.id for participant in Participant.query.all()
-        ]
+        data["participants"] = {
+            participant.id: {
+                "z": (
+                    participant.var.get("z", None) if self.z_attribute else None
+                ),
+            }
+            for participant in Participant.query.all()
+        }
 
         return data
 
@@ -604,7 +637,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
-        next_node = self.ai.get_optimal_node(
+        next_node = self.optimizer.get_optimal_node(
             list(candidates.keys()), participant, data
         )
 
@@ -626,7 +659,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # re-order
         order = [node.id for node in nodes]
-        networks = sorted(networks, key=lambda network: order.index(network.head.id))
+        networks = sorted(
+            networks, key=lambda network: order.index(network.head.id)
+        )
 
         return networks
 
@@ -647,15 +682,172 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
 
 
+class ActiveInference:
+    def get_optimal_node(self, nodes_ids, participant, data):
+        z_i = participant.var.z
+
+        n_samples = 1000
+
+        rewards = dict()
+        eig = dict()
+        utility = dict()
+
+        alphas = dict()
+        betas = dict()
+
+        z_participants = np.array(
+            [
+                data["participants"][participant_id]["z"]
+                for participant_id in data["participants"]
+                if data["participants"][participant_id]["z"] != None
+            ]
+        )
+
+        alpha_z = 1 + np.sum(z_participants == 1)
+        beta_z = 1 + np.sum(z_participants == 0)
+        p_z = alpha_z / (alpha_z + beta_z)
+
+        for node_id in nodes_ids:
+            alpha = np.ones(2)
+            beta = np.ones(2)
+
+            for trial_id, trial in data["nodes"][node_id].items():
+                if trial["y"] == True:
+                    alpha[trial["z"]] += 1
+                elif trial["y"] == False:
+                    beta[trial["z"]] += 1
+
+            alphas[node_id] = alpha
+            betas[node_id] = beta
+
+            alpha = alpha[:, np.newaxis]
+            beta = beta[:, np.newaxis]
+
+            phi = np.random.beta(
+                alpha,
+                beta,
+                (2, n_samples),
+            )
+
+            y = np.random.binomial(
+                np.ones((2, n_samples), dtype=int),
+                phi,
+                size=(
+                    2,
+                    n_samples,
+                ),
+            )
+
+            p_y_given_phi = phi * y + (1 - phi) * (1 - y)
+            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
+
+            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+
+            gamma = 0.2
+            U = gamma * np.mean(
+                p_z * y[1]
+                + (1 - p_z) * (1 - y[0])
+                - p_z * (1 - y[1])
+                - (1 - p_z) * y[0]
+            )
+
+            rewards[node_id] = EIG + U
+            eig[node_id] = EIG
+            utility[node_id] = U
+
+        from matplotlib import pyplot as plt
+
+        if np.random.uniform() > 1 and len(nodes_ids) == 15:
+            cmap = plt.get_cmap("tab10")
+            fig, ax = plt.subplots()
+            for node_id in nodes_ids:
+                color = cmap(node_id % 10)
+                x = np.linspace(0, 1, 100)
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node_id][0],
+                        b=betas[node_id][0],
+                    ),
+                    color=color,
+                    label=rewards[node_id],
+                )
+                ax.plot(
+                    x,
+                    beta_dist.pdf(
+                        x,
+                        a=alphas[node_id][1],
+                        b=betas[node_id][1],
+                    ),
+                    color=color,
+                    ls="dashed",
+                )
+            plt.legend()
+            plt.show()
+
+        best_network = sorted(
+            list(rewards.keys()),
+            key=lambda node_id: rewards[node_id],
+            reverse=True,
+        )[0]
+
+        if len(nodes_ids) == 15:
+            logger.info("Saving")
+            with open("output/utility.csv", "a", newline="") as file:
+                writer = csv.writer(file)
+                writer.writerow(
+                    [
+                        rewards[best_network],
+                        eig[best_network],
+                        utility[best_network],
+                    ]
+                )
+
+        return best_network
+
+
 class Exp(psynet.experiment.Experiment):
-    label = "Adaptive Bayesian testing demo"
+    label = "Active inference for adaptive experiments"
     initial_recruitment_size = 1
     test_n_bots = 200
     test_mode = "serial"
 
     timeline = Timeline(
         MainConsent(),
-        BasicDemography(),
-        KnowledgeTrialMaker(),
+        FormalEducation(),
+        CodeBlock(
+            lambda participant: participant.var.set(
+                "z",
+                (
+                    oracle.college(participant.id)
+                    if DEBUG_MODE
+                    else (
+                        participant.answer
+                        in [
+                            "college",
+                            "graduate_school",
+                            "postgraduate_degree_or_higher",
+                        ]
+                    )
+                ),
+            )
+        ),
+        KnowledgeTrialMaker(
+            id_="optimal_treatment",
+            optimizer_class=ActiveInference,
+            domain=0,
+            z_attribute=True,
+            expected_trials_per_participant=5,
+            max_trials_per_participant=5,
+        ),
+        KnowledgeTrialMaker(
+            id_="optimal_test",
+            optimizer_class=AdaptiveTesting,
+            domain=0,
+            z_attribute=False,
+            expected_trials_per_participant=15,
+            max_trials_per_participant=15,
+        ),
         SuccessfulEndPage(),
     )
