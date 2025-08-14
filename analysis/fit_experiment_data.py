@@ -12,30 +12,32 @@ def load_and_prepare_data(csv_file):
     """Load the knowledge trial data and prepare it for IRT modeling"""
 
     df = pd.read_csv(csv_file)
+    df = df[df["trial_maker_id"] == "optimal_test"]
 
-    # Convert correct column to binary (handle string and boolean values)
-    df['correct_binary'] = df['correct'].apply(
-        lambda x: 1 if x == 'True' or x == True else 0,
+    # Convert y column to binary (handle string and boolean values)
+    df["y_binary"] = df["y"].apply(
+        lambda x: 1 if x == "True" or x == True else 0,
     )
 
     # Create sequential participant and item IDs for Stan (1-indexed)
-    unique_participants = sorted(df['participant_id'].unique())
-    unique_items = sorted(df['item_id'].unique())
+    unique_participants = sorted(df["participant_id"].unique())
+    unique_items = sorted(df["item_id"].unique())
 
     # Create mapping dictionaries
-    participant_map = {pid: idx + 1 for idx, pid in
-                       enumerate(unique_participants)}
+    participant_map = {
+        pid: idx + 1 for idx, pid in enumerate(unique_participants)
+    }
     item_map = {iid: idx + 1 for idx, iid in enumerate(unique_items)}
 
     # Apply mappings
-    df['stan_participant_id'] = df['participant_id'].map(participant_map)
-    df['stan_item_id'] = df['item_id'].map(item_map)
+    df["stan_participant_id"] = df["participant_id"].map(participant_map)
+    df["stan_item_id"] = df["item_id"].map(item_map)
 
     print(f"Data preparation complete:")
     print(f"  {len(unique_participants)} participants")
     print(f"  {len(unique_items)} items")
     print(f"  {len(df)} total responses")
-    print(f"  Overall accuracy: {df['correct_binary'].mean():.3f}")
+    print(f"  Overall accuracy: {df['y_binary'].mean():.3f}")
 
     return df, participant_map, item_map, unique_participants, unique_items
 
@@ -51,7 +53,7 @@ def create_stan_model():
         int<lower=1> K;                    // number of items
         array[N] int<lower=1,upper=J> jj;  // participant for observation n
         array[N] int<lower=1,upper=K> kk;  // item for observation n
-        array[N] int<lower=0,upper=1> y;   // correctness for observation n
+        array[N] int<lower=0,upper=1> y;   // yness for observation n
     }
 
     parameters {
@@ -89,18 +91,22 @@ def create_stan_model():
 
 
 def fit_irt_model(
-        df, chains=4, iter_warmup=1000, iter_sampling=1000, parallel_chains=4,
+    df,
+    chains=4,
+    iter_warmup=1000,
+    iter_sampling=1000,
+    parallel_chains=4,
 ):
     """Fit the IRT model using cmdstanpy"""
 
     # Prepare data for Stan
     stan_data = {
-        'N': len(df),
-        'J': df['stan_participant_id'].nunique(),
-        'K': df['stan_item_id'].nunique(),
-        'jj': df['stan_participant_id'].tolist(),
-        'kk': df['stan_item_id'].tolist(),
-        'y': df['correct_binary'].tolist(),
+        "N": len(df),
+        "J": df["stan_participant_id"].nunique(),
+        "K": df["stan_item_id"].nunique(),
+        "jj": df["stan_participant_id"].tolist(),
+        "kk": df["stan_item_id"].tolist(),
+        "y": df["y_binary"].tolist(),
     }
 
     print("Stan data prepared:")
@@ -113,7 +119,7 @@ def fit_irt_model(
     # Write Stan model to file
     stan_code = create_stan_model()
     model_file = "output/irt_model.stan"
-    with open(model_file, 'w') as f:
+    with open(model_file, "w") as f:
         f.write(stan_code)
 
     print(f"\nStan model written to {model_file}")
@@ -164,22 +170,31 @@ def main():
     print("=" * 50)
 
     # 1. Load and prepare data
-    df, participant_map, item_map, unique_participants, unique_items = load_and_prepare_data(
-        "output/KnowledgeTrial_adaptive.csv",
+    df, participant_map, item_map, unique_participants, unique_items = (
+        load_and_prepare_data(
+            "output/KnowledgeTrial_adaptive.csv",
+        )
     )
     fit, stan_data = fit_irt_model(
-        df, chains=4, iter_warmup=1000, iter_sampling=2000,
+        df,
+        chains=4,
+        iter_warmup=1000,
+        iter_sampling=2000,
     )
-    stan_vars = save_stan_samples(fit, 'output/irt_samples_adaptive.npz')
+    stan_vars = save_stan_samples(fit, "output/irt_samples_adaptive.npz")
 
-
-    df, participant_map, item_map, unique_participants, unique_items = load_and_prepare_data(
-        "output/KnowledgeTrial_static.csv",
+    df, participant_map, item_map, unique_participants, unique_items = (
+        load_and_prepare_data(
+            "output/KnowledgeTrial_oracle.csv",
+        )
     )
     fit, stan_data = fit_irt_model(
-        df, chains=4, iter_warmup=1000, iter_sampling=2000,
+        df,
+        chains=4,
+        iter_warmup=1000,
+        iter_sampling=2000,
     )
-    stan_vars = save_stan_samples(fit, 'output/irt_samples_static.npz')
+    stan_vars = save_stan_samples(fit, "output/irt_samples_oracle.npz")
 
     return fit, stan_vars
 
