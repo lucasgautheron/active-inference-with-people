@@ -413,7 +413,9 @@ class AdaptiveTesting:
         p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
         entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
 
-        if best_eig < 0.02 and np.max(entropy) < 0.7:
+        epsilon = 0.05
+        delta = 1
+        if best_eig < epsilon and np.max(entropy) < delta:
             logger.debug("Stopping criteria met - low EIG and entropy")
             return None
 
@@ -469,8 +471,10 @@ class AdaptiveTesting:
                     color=color,
                     label="$H(y)$" if i == 0 else None,
                 )
-                plt.xlim(-3, 3)
-                plt.ylim(0, 1)
+
+            plt.axhline(epsilon, label=r"$\varepsilon$")
+            plt.xlim(-3, 3)
+            plt.ylim(0, 1)
 
             plt.legend()
             plt.savefig(
