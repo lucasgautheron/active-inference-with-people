@@ -8,11 +8,14 @@ from pathlib import Path
 
 
 # Load and prepare the data
-def load_and_prepare_data(csv_file):
+def load_and_prepare_data(csv_file, samples=None):
     """Load the knowledge trial data and prepare it for IRT modeling"""
 
     df = pd.read_csv(csv_file)
     df = df[df["trial_maker_id"] == "optimal_test"]
+
+    if samples is not None:
+        df = df.sample(samples)
 
     # Convert y column to binary (handle string and boolean values)
     df["y_binary"] = df["y"].apply(
@@ -182,6 +185,7 @@ def main():
         iter_sampling=2000,
     )
     stan_vars = save_stan_samples(fit, "output/irt_samples_adaptive.npz")
+    n_adaptive_responses = len(df)
 
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
@@ -196,9 +200,20 @@ def main():
     )
     stan_vars = save_stan_samples(fit, "output/irt_samples_oracle.npz")
 
-    return fit, stan_vars
-
+    df, participant_map, item_map, unique_participants, unique_items = (
+        load_and_prepare_data(
+            "output/KnowledgeTrial_oracle.csv",
+            samples=n_adaptive_responses
+        )
+    )
+    fit, stan_data = fit_irt_model(
+        df,
+        chains=4,
+        iter_warmup=1000,
+        iter_sampling=2000,
+    )
+    stan_vars = save_stan_samples(fit, "output/irt_samples_static.npz")
 
 # Run the analysis
 if __name__ == "__main__":
-    fit, stan_vars = main()
+    main()

@@ -503,7 +503,7 @@ class AdaptiveTesting(OptimalDesign):
 
     def outcome_probability(self, participant, trial):
         p = float(self.p_y.get((participant.id, trial.node.id), None))
-        return {0: 1-p, 1: p}
+        return {0: 1 - p, 1: p}
 
 
 class KnowledgeTrial(StaticTrial):
@@ -708,11 +708,13 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     ):
         trial.var.y = trial.answer.lower() in trial.node.definition["answers"]
         trial.var.z = (
-            trial.participant.var.z if self.use_participant_data else None
+            int(trial.participant.var.z) if self.use_participant_data else None
         )
-        trial.var.p = self.optimizer.outcome_probability(
-            trial.participant, trial
-        )
+        if self.optimizer is not None:
+            trial.var.p = self.optimizer.outcome_probability(
+                trial.participant, trial
+            )
+
         logger.info(trial.var)
 
         super().finalize_trial(
@@ -729,7 +731,7 @@ class ActiveInference(OptimalDesign):
 
     def outcome_probability(self, participant, trial):
         p = float(self.p_y.get((participant.id, trial.node.id), None))
-        return {0: 1-p, 1: p}
+        return {0: 1 - p, 1: p}
 
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
@@ -884,38 +886,38 @@ class Exp(psynet.experiment.Experiment):
                 ),
             )
         ),
-        KnowledgeTrialMaker(
-            id_="optimal_treatment",
-            optimizer_class=ActiveInference,  # Active inference w/ a prior preference over outcomes
-            domain=0,  # questions about the solar system
-            use_participant_data=True,  # optimization requires participant metadata
-            expected_trials_per_participant=5,
-            max_trials_per_participant=5,
-        ),
-        KnowledgeTrialMaker(
-            id_="optimal_test",
-            optimizer_class=AdaptiveTesting,  # Bayesian adaptive design w/ an item-response model
-            domain=0,  # questions about the solar system
-            use_participant_data=False,  # optimization does not require participant metadata
-            expected_trials_per_participant=15,
-            max_trials_per_participant=15,
-        ),
         # KnowledgeTrialMaker(
         #     id_="optimal_treatment",
-        #     optimizer_class=None,  # Active inference w/ a prior preference over outcomes
+        #     optimizer_class=ActiveInference,  # Active inference w/ a prior preference over outcomes
         #     domain=0,  # questions about the solar system
         #     use_participant_data=True,  # optimization requires participant metadata
-        #     expected_trials_per_participant=15,
-        #     max_trials_per_participant=15,
+        #     expected_trials_per_participant=5,
+        #     max_trials_per_participant=5,
         # ),
         # KnowledgeTrialMaker(
         #     id_="optimal_test",
-        #     optimizer_class=None,  # Bayesian adaptive design w/ an item-response model
+        #     optimizer_class=AdaptiveTesting,  # Bayesian adaptive design w/ an item-response model
         #     domain=0,  # questions about the solar system
         #     use_participant_data=False,  # optimization does not require participant metadata
         #     expected_trials_per_participant=15,
         #     max_trials_per_participant=15,
         # ),
+        KnowledgeTrialMaker(
+            id_="optimal_treatment",
+            optimizer_class=None,  # Active inference w/ a prior preference over outcomes
+            domain=0,  # questions about the solar system
+            use_participant_data=True,  # optimization requires participant metadata
+            expected_trials_per_participant=15,
+            max_trials_per_participant=15,
+        ),
+        KnowledgeTrialMaker(
+            id_="optimal_test",
+            optimizer_class=None,  # Bayesian adaptive design w/ an item-response model
+            domain=0,  # questions about the solar system
+            use_participant_data=False,  # optimization does not require participant metadata
+            expected_trials_per_participant=15,
+            max_trials_per_participant=15,
+        ),
         # KnowledgeTrialMaker(
         #     id_="optimal_treatment",
         #     optimizer_class=None,  # Active inference w/ a prior preference over outcomes
