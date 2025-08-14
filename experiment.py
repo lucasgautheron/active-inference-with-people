@@ -107,42 +107,43 @@ class AdaptiveTesting:
         that takes item indices as design"""
 
         def model(design):
-            # Sample ability parameter for the target participant
-            theta = pyro.sample(
-                "theta",
-                dist.Normal(
-                    self.theta_means[target_participant],
-                    self.theta_sds[target_participant],
-                ),
-            )
-            theta = theta.unsqueeze(-1)
+            with pyro.plate_stack("plate", design.shape[:-1]):
+                # Sample ability parameter for the target participant
+                theta = pyro.sample(
+                    "theta",
+                    dist.Normal(
+                        self.theta_means[target_participant],
+                        self.theta_sds[target_participant],
+                    ),
+                )
+                theta = theta.unsqueeze(-1)
 
-            item_idx = design.squeeze(-1).long()
-            difficulties = pyro.sample(
-                "difficulties",
-                dist.Normal(
-                    self.difficulty_means[item_idx],
-                    self.difficulty_sds[item_idx],
-                ),
-            ).unsqueeze(-1)
+                item_idx = design.squeeze(-1).long()
+                difficulties = pyro.sample(
+                    "difficulties",
+                    dist.Normal(
+                        self.difficulty_means[item_idx],
+                        self.difficulty_sds[item_idx],
+                    ),
+                ).unsqueeze(-1)
 
-            intercept = pyro.sample(
-                "intercept",
-                dist.Normal(
-                    self.intercept_mean,
-                    self.intercept_sd,
-                ),
-            ).unsqueeze(-1)
-            logit_p = (theta - difficulties) + intercept
+                intercept = pyro.sample(
+                    "intercept",
+                    dist.Normal(
+                        self.intercept_mean,
+                        self.intercept_sd,
+                    ),
+                ).unsqueeze(-1)
+                logit_p = (theta - difficulties) + intercept
 
-            y = pyro.sample(
-                "y",
-                dist.Bernoulli(
-                    logits=logit_p,
-                ).to_event(1),
-            )
+                y = pyro.sample(
+                    "y",
+                    dist.Bernoulli(
+                        logits=logit_p,
+                    ).to_event(1),
+                )
 
-            return y
+                return y
 
         return model
 
@@ -424,12 +425,14 @@ class AdaptiveTesting:
                 scale=self.theta_sds[self.participant_index[participant.id]],
             )
 
-            plt.plot(x, y, label="Participant ability")
+            plt.plot(x, y, color="black", label=r"$\theta$(participant)")
+
+            eig = eig.detach().numpy()
 
             cmap = plt.get_cmap("tab10")
             for i in range(len(candidates)):
                 item = candidates[i]
-                color = cmap(i)
+                color = cmap(i % 10)
                 y = norm.pdf(
                     x,
                     loc=self.difficulty_means[self.item_index[item]]
@@ -442,7 +445,6 @@ class AdaptiveTesting:
                 plt.plot(
                     x,
                     y,
-                    label="Item difficulty",
                     alpha=0.2,
                     color=color,
                 )
@@ -451,8 +453,11 @@ class AdaptiveTesting:
                         self.difficulty_means[self.item_index[item]]
                         - self.intercept_mean,
                     ],
-                    [eig.detach()[i]],
-                    color=color,
+                    [eig[i]],
+                    facecolors="none",
+                    edgecolors=color,
+                    marker="s",
+                    label="EIG" if i == 0 else None,
                 )
 
                 plt.scatter(
@@ -461,11 +466,13 @@ class AdaptiveTesting:
                         - self.intercept_mean,
                     ],
                     [entropy[i]],
-                    color="black",
+                    color=color,
+                    label="$H(y)$" if i == 0 else None,
                 )
                 plt.xlim(-3, 3)
                 plt.ylim(0, 1)
 
+            plt.legend()
             plt.savefig(
                 "output/test_{}.png".format(participant.id),
             )
@@ -620,8 +627,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             for participant in Participant.query.all()
         }
 
-        logger.info(data["participants"])
-
         return data
 
     def prioritize_nodes(self, nodes, participant, experiment):
@@ -733,8 +738,6 @@ class ActiveInference:
             p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
 
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
-
-            logger.info(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
             gamma = 0.2
             U = gamma * np.mean(
