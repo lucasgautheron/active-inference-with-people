@@ -411,11 +411,11 @@ class AdaptiveTesting(OptimalDesign):
             candidate_designs,
             "y",
             ["theta", "difficulties", "intercept"],
-            num_samples=200 * 10,
+            num_samples=1000,
             num_steps=self.num_steps * 2,
             guide=self._marginal_guide,
             optim=optimizer,
-            final_num_samples=2000 * 10,
+            final_num_samples=10000,
         )
 
         # Find the item with maximum EIG
@@ -502,8 +502,8 @@ class AdaptiveTesting(OptimalDesign):
         return optimal_test
 
     def outcome_probability(self, participant, trial):
-        p = self.p_y.get((participant.id, trial.node.id), None)
-        return trial.var.y * p + (1 - trial.var.y) * (1 - p)
+        p = float(self.p_y.get((participant.id, trial.node.id), None))
+        return {0: 1-p, 1: p}
 
 
 class KnowledgeTrial(StaticTrial):
@@ -728,13 +728,13 @@ class ActiveInference(OptimalDesign):
         self.p_y = dict()
 
     def outcome_probability(self, participant, trial):
-        p = self.p_y.get((participant.id, trial.node.id), None)
-        return trial.var.y * p + (1 - trial.var.y) * (1 - p)
+        p = float(self.p_y.get((participant.id, trial.node.id), None))
+        return {0: 1-p, 1: p}
 
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
-        n_samples = 1000
+        S = 1000
 
         rewards = dict()
         eig = dict()
@@ -774,22 +774,23 @@ class ActiveInference(OptimalDesign):
             phi = np.random.beta(
                 alpha,
                 beta,
-                (2, n_samples),
+                (2, S),
             )
 
             y = np.random.binomial(
-                np.ones((2, n_samples), dtype=int),
+                np.ones((2, S), dtype=int),
                 phi,
                 size=(
                     2,
-                    n_samples,
+                    S,
                 ),
             )
 
             p_y_given_phi = phi * y + (1 - phi) * (1 - y)
             p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
 
-            self.p_y[(participant.id, node_id)] = p_y[z_i].mean()
+            # P(y=1|z_i)
+            self.p_y[(participant.id, node_id)] = (alpha / (alpha + beta))[z_i]
 
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
@@ -899,6 +900,22 @@ class Exp(psynet.experiment.Experiment):
             expected_trials_per_participant=15,
             max_trials_per_participant=15,
         ),
+        # KnowledgeTrialMaker(
+        #     id_="optimal_treatment",
+        #     optimizer_class=None,  # Active inference w/ a prior preference over outcomes
+        #     domain=0,  # questions about the solar system
+        #     use_participant_data=True,  # optimization requires participant metadata
+        #     expected_trials_per_participant=15,
+        #     max_trials_per_participant=15,
+        # ),
+        # KnowledgeTrialMaker(
+        #     id_="optimal_test",
+        #     optimizer_class=None,  # Bayesian adaptive design w/ an item-response model
+        #     domain=0,  # questions about the solar system
+        #     use_participant_data=False,  # optimization does not require participant metadata
+        #     expected_trials_per_participant=15,
+        #     max_trials_per_participant=15,
+        # ),
         # KnowledgeTrialMaker(
         #     id_="optimal_treatment",
         #     optimizer_class=None,  # Active inference w/ a prior preference over outcomes
