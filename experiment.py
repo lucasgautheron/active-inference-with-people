@@ -35,11 +35,15 @@ import pandas as pd
 import csv
 
 DEBUG_MODE = True
+SETUP = "adaptive"
+
+assert SETUP in ["adaptive", "oracle"]
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 logger = logging.getLogger()
+
 
 
 class Oracle:
@@ -78,7 +82,18 @@ class Oracle:
 oracle = Oracle(domain=0)
 
 
-class AdaptiveTesting:
+class OptimalDesign:
+    def __init__(self):
+        pass
+
+    def get_optimal_node(self, candidates, participant, data):
+        raise NotImplementedError()
+
+    def outcome_probability(self, participant, trial):
+        raise NotImplementedError()
+
+
+class AdaptiveTesting(OptimalDesign):
     def __init__(self):
         logger.debug("Initializing adaptive learner.")
 
@@ -101,6 +116,9 @@ class AdaptiveTesting:
         self.num_steps = 1000
         self.start_lr = 0.1
         self.end_lr = 0.001
+
+        # Posterior predictive probability of outcome
+        self.p_y = dict()
 
     def _make_design_model(self, target_participant):
         """Create a model for a specific participant
@@ -397,11 +415,11 @@ class AdaptiveTesting:
             candidate_designs,
             "y",
             ["theta", "difficulties", "intercept"],
-            num_samples=200 * 10,
+            num_samples=1000,
             num_steps=self.num_steps * 2,
             guide=self._marginal_guide,
             optim=optimizer,
-            final_num_samples=2000 * 10,
+            final_num_samples=10000,
         )
 
         # Find the item with maximum EIG
@@ -409,17 +427,20 @@ class AdaptiveTesting:
         optimal_test = candidates[best_idx]
         best_eig = eig.detach().max()
 
-        # Apply early-stopping criteria
-        p = torch.special.expit(pyro.param("q_logit")).detach().numpy()
-        entropy = -p * np.log2(p) - (1 - p) * np.log2(1 - p)
+        # Retrieve the posterior predictive probability for each design
+        p_y = torch.special.expit(pyro.param("q_logit")).detach().numpy()
+        for idx, candidate in enumerate(candidates):
+            self.p_y[(participant.id, candidate)] = p_y[idx]
 
+        # Apply early-stopping criteria
         epsilon = 0.05
-        delta = 1
-        if best_eig < epsilon and np.max(entropy) < delta:
+        if best_eig < epsilon:
             logger.debug("Stopping criteria met - low EIG and entropy")
             return None
 
         if DEBUG_MODE:
+            entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
+
             x = np.linspace(-3, +3, 200)
             y = norm.pdf(
                 x,
@@ -484,6 +505,10 @@ class AdaptiveTesting:
 
         return optimal_test
 
+    def outcome_probability(self, participant, trial):
+        p = float(self.p_y.get((participant.id, trial.node.id), None))
+        return {0: 1 - p, 1: p}
+
 
 class KnowledgeTrial(StaticTrial):
     time_estimate = (
@@ -511,6 +536,12 @@ class KnowledgeTrial(StaticTrial):
 
         # Keeps track of whether the participant correctly answered
         self.var.y = None
+
+        # Relevant participant metadata
+        self.var.z = None
+
+        # Posterior predictive probability of given answer
+        self.var.p = None
 
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
@@ -550,7 +581,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         self,
         optimizer_class,
         domain,
-        z_attribute,
+        use_participant_data,
         *args,
         **kwargs,
     ):
@@ -574,8 +605,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
 
         logger.info("Initializing optimization module.")
-        self.optimizer = optimizer_class()
-        self.z_attribute = z_attribute
+        self.optimizer = (
+            optimizer_class() if optimizer_class is not None else None
+        )
+        self.use_participant_data = use_participant_data
 
     def load_nodes(self, domain):
         questions = pd.read_csv("static/questions.csv")
@@ -612,7 +645,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                 y = trial.var.get("y")
                 z = (
                     trial.participant.var.get("z", None)
-                    if self.z_attribute
+                    if self.use_participant_data
                     else None
                 )
 
@@ -625,7 +658,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         data["participants"] = {
             participant.id: {
                 "z": (
-                    participant.var.get("z", None) if self.z_attribute else None
+                    participant.var.get("z", None)
+                    if self.use_participant_data
+                    else None
                 ),
             }
             for participant in Participant.query.all()
@@ -647,6 +682,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return [candidates[next_node]]
 
     def prioritize_networks(self, networks, participant, experiment):
+        if self.optimizer is None:
+            return networks
+
         nodes = [network.head for network in networks]
         nodes = self.prioritize_nodes(nodes, participant, experiment)
 
@@ -673,6 +711,15 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         participant,
     ):
         trial.var.y = trial.answer.lower() in trial.node.definition["answers"]
+        trial.var.z = (
+            int(trial.participant.var.z) if self.use_participant_data else None
+        )
+        if self.optimizer is not None:
+            trial.var.p = self.optimizer.outcome_probability(
+                trial.participant, trial
+            )
+
+        logger.info(trial.var)
 
         super().finalize_trial(
             answer,
@@ -682,11 +729,18 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
 
 
-class ActiveInference:
+class ActiveInference(OptimalDesign):
+    def __init__(self):
+        self.p_y = dict()
+
+    def outcome_probability(self, participant, trial):
+        p = float(self.p_y.get((participant.id, trial.node.id), None))
+        return {0: 1 - p, 1: p}
+
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
-        n_samples = 1000
+        S = 1000
 
         rewards = dict()
         eig = dict()
@@ -726,20 +780,23 @@ class ActiveInference:
             phi = np.random.beta(
                 alpha,
                 beta,
-                (2, n_samples),
+                (2, S),
             )
 
             y = np.random.binomial(
-                np.ones((2, n_samples), dtype=int),
+                np.ones((2, S), dtype=int),
                 phi,
                 size=(
                     2,
-                    n_samples,
+                    S,
                 ),
             )
 
             p_y_given_phi = phi * y + (1 - phi) * (1 - y)
             p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
+
+            # P(y=1|z_i)
+            self.p_y[(participant.id, node_id)] = (alpha / (alpha + beta))[z_i]
 
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
@@ -835,17 +892,17 @@ class Exp(psynet.experiment.Experiment):
         ),
         KnowledgeTrialMaker(
             id_="optimal_treatment",
-            optimizer_class=ActiveInference,
-            domain=0,
-            z_attribute=True,
+            optimizer_class=ActiveInference if SETUP == "adaptive" else None,  # Active inference w/ a prior preference over outcomes
+            domain=0,  # questions about the solar system
+            use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
             max_trials_per_participant=5,
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
-            optimizer_class=AdaptiveTesting,
-            domain=0,
-            z_attribute=False,
+            optimizer_class=AdaptiveTesting if SETUP == "adaptive" else None,  # Bayesian adaptive design w/ an item-response model
+            domain=0,  # questions about the solar system
+            use_participant_data=False,  # optimization does not require participant metadata
             expected_trials_per_participant=15,
             max_trials_per_participant=15,
         ),
