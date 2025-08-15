@@ -753,7 +753,7 @@ class ActiveInference(OptimalDesign):
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
-        S = 1000
+        S = 2000
 
         rewards = dict()
         eig = dict()
@@ -923,6 +923,15 @@ class Exp(psynet.experiment.Experiment):
     timeline = Timeline(
         MainConsent(),
         FormalEducation(),
+        InfoPage(
+            Markup(
+                f"<h3>Before we begin...</h3>"
+                f"<div style='margin: 10px;'>You will be presented with a series of trivia questions, such as \"Who was the first man to step on the moon?\".</div>"
+                f"<div style='margin: 10px;'>If you do not know the answer to a question, just skip to the next question.</div>"
+                f"<div style='margin: 10px;'>Please do <i>not</i> write your answer as sentences. For instance, if the question is: what is the current year? Please just answer '2025'. Do <i>NOT</i> answer, say, 'The current year is 2025'. </div>"
+            ),
+            time_estimate=5,
+        ),
         CodeBlock(
             lambda participant: participant.var.set(
                 "z",
