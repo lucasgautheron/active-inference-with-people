@@ -33,17 +33,20 @@ from scipy.stats import norm
 
 import pandas as pd
 import csv
+import json
 
 DEBUG_MODE = False
 SETUP = "adaptive"
+RECRUITER = "hotair"
+DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
 
 assert SETUP in ["adaptive", "oracle"]
+assert RECRUITER in ["hotair", "prolific", "cap-recruiter"]
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 logger = logging.getLogger()
-
 
 
 class Oracle:
@@ -512,7 +515,7 @@ class AdaptiveTesting(OptimalDesign):
 
 class KnowledgeTrial(StaticTrial):
     time_estimate = (
-        10  # how long it should take to complete each trial, in seconds
+        20  # how long it should take to complete each trial, in seconds
     )
 
     def __init__(
@@ -864,11 +867,62 @@ class ActiveInference(OptimalDesign):
         return best_network
 
 
+def get_prolific_settings(experiment_duration):
+    with open("pt_prolific_en.json", "r") as f:
+        qualification = json.dumps(json.load(f))
+
+    return {
+        "recruiter": "prolific",
+        "base_payment": 9 * DURATION_ESTIMATE / 60 / 60,
+        "prolific_estimated_completion_minutes": DURATION_ESTIMATE / 60,
+        "prolific_recruitment_config": qualification,
+        "auto_recruit": False,
+        "wage_per_hour": 0,
+        "currency": "£",
+        "show_reward": False,
+    }
+
+
+def get_cap_settings(experiment_duration):
+    raise {"wage_per_hour": 12}
+
+
+recruiter_settings = None
+if RECRUITER == "prolific":
+    recruiter_settings = get_prolific_settings(DURATION_ESTIMATE)
+elif RECRUITER == "cap-recruiter":
+    recruiter_settings = get_cap_settings(DURATION_ESTIMATE)
+
+
 class Exp(psynet.experiment.Experiment):
     label = "Active inference for adaptive experiments"
     initial_recruitment_size = 1
     test_n_bots = 200
     test_mode = "serial"
+
+    config = {
+        "recruiter": RECRUITER,
+        "wage_per_hour": 0,
+        # "publish_experiment": False,
+        "title": (
+            "Trivia questions (Chrome browser, ~8 minutes to complete, ~2£)"
+        ),
+        "description": " ".join(
+            [
+                "This experiment requires you to answer a few trivia questions.",
+                "We recommend opening the experiment in an incognito window in Chrome, as some browser add-ons can interfere with the experiment.",
+                "If you have any questions or concerns, please contact us through Prolific.",
+            ]
+        ),
+        "initial_recruitment_size": 10,
+        "auto_recruit": False,
+        "show_reward": False,
+        "contact_email_on_error": "lucas.gautheron@gmail.com",
+        "organization_name": "Max Planck Institute for Empirical Aesthetics",
+    }
+
+    if MODE != "HOTAIR":
+        config.update(**recruiter_settings)
 
     timeline = Timeline(
         MainConsent(),
@@ -892,7 +946,9 @@ class Exp(psynet.experiment.Experiment):
         ),
         KnowledgeTrialMaker(
             id_="optimal_treatment",
-            optimizer_class=ActiveInference if SETUP == "adaptive" else None,  # Active inference w/ a prior preference over outcomes
+            optimizer_class=(
+                ActiveInference if SETUP == "adaptive" else None
+            ),  # Active inference w/ a prior preference over outcomes
             domain=1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
@@ -900,7 +956,9 @@ class Exp(psynet.experiment.Experiment):
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
-            optimizer_class=AdaptiveTesting if SETUP == "adaptive" else None,  # Bayesian adaptive design w/ an item-response model
+            optimizer_class=(
+                AdaptiveTesting if SETUP == "adaptive" else None
+            ),  # Bayesian adaptive design w/ an item-response model
             domain=0,  # questions about the solar system
             use_participant_data=False,  # optimization does not require participant metadata
             expected_trials_per_participant=15,
