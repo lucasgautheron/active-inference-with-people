@@ -3,6 +3,7 @@ psynet==12.1.0
 pyro-ppl==1.9.1
 matplotlib
 pandas
+scipy==1.15.3
 
 # Alternatively, you can use one of the following syntaxes to specify a custom PsyNet version
 # psynet@git+https://gitlab.com/PsyNetDev/PsyNet@v10.4.0#egg=psynet
