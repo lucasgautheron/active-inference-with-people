@@ -44,6 +44,7 @@ print(adaptive.groupby("participant_id")["node_id"].first().value_counts())
 
 
 def plot_predictive_check(df):
+    df = df.head(int(0.5*len(df)))
     fig, ax = plt.subplots(figsize=(3.2, 2.333))
 
     ax.scatter(df["p"], df["y"], alpha=0.075, s=5, edgecolors="black", lw=0.2)
@@ -145,8 +146,8 @@ scatter = ax.scatter(
     lw=0.1,
     alpha=0.5,
 )
-ax.set_xlabel(r"Posterior $\theta_i$ (oracle)")
-ax.set_ylabel(r"Posterior $\theta_i$ (adaptive)")
+ax.set_xlabel(r"Posterior $\bar{\theta_i}$ (oracle)")
+ax.set_ylabel(r"Posterior $\bar{\theta_i}$ (adaptive)")
 
 r2 = np.corrcoef(theta_oracle, theta_adaptive)[0, 1] ** 2
 ax.text(
@@ -158,9 +159,9 @@ ax.text(
     va="top",
 )
 ax.text(
-    0.05,
+    0.0875,
     0.85,
-    f"$\\langle n_i \\rangle={n.mean():.1f}$",
+    f"$\\bar{{n_i}}={n.mean():.1f}$",
     transform=ax.transAxes,
     ha="left",
     va="top",
