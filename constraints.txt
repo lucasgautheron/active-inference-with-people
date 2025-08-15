@@ -4,7 +4,7 @@
 #
 #    dallinger generate-constraints
 #
-# Compiled from a requirement.txt file with md5sum: e21a0e0f3988eb0d0e7921474e780d9a
+# Compiled from a requirement.txt file with md5sum: 39117dd9984a472cda9dbdc9cceb48d7
 #
 ansi2html==1.9.2
     # via
@@ -80,12 +80,16 @@ click==8.1.8
     #   flask
     #   pip-tools
     #   rq
+contourpy==1.3.3
+    # via matplotlib
 cryptography==45.0.2
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   paramiko
     #   pyopenssl
-dallinger[docker]==11.3.1
+cycler==0.12.1
+    # via matplotlib
+dallinger[docker]==11.4.0
     # via psynet
 decorator==5.2.1
     # via
@@ -133,6 +137,8 @@ flask-wtf==1.2.2
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   dallinger
+fonttools==4.59.1
+    # via matplotlib
 fsspec==2025.7.0
     # via torch
 future==1.0.0
@@ -199,6 +205,8 @@ joblib==1.5.1
     # via psynet
 jsonpickle==4.1.1
     # via psynet
+kiwisolver==1.4.9
+    # via matplotlib
 localconfig==1.1.4
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
@@ -210,6 +218,8 @@ markupsafe==3.0.2
     #   jinja2
     #   werkzeug
     #   wtforms
+matplotlib==3.10.5
+    # via -r requirements.txt
 matplotlib-inline==0.1.7
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
@@ -223,9 +233,12 @@ networkx==3.5
 numpy==2.0.2
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
+    #   contourpy
     #   dallinger
+    #   matplotlib
     #   pandas
     #   pyro-ppl
+    #   scipy
 opt-einsum==3.4.0
     # via pyro-ppl
 outcome==1.3.0.post0
@@ -238,10 +251,12 @@ packaging==25.0
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   build
     #   gunicorn
+    #   matplotlib
     #   pytest
 pandas==2.2.3
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
+    #   -r /var/folders/n_/1jsh_4z951n2wf4_2t22fqxm0000gn/T/tmplq5h0vqi/requirements.txt
     #   psynet
 paramiko==3.5.1
     # via
@@ -259,8 +274,14 @@ pexpect==4.9.0
     #   dallinger
     #   ipython
 pillow==11.3.0
-    # via psynet
+    # via
+    #   matplotlib
+    #   psynet
 pip-tools==7.4.1
+    # via
+    #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
+    #   dallinger
+platformdirs==4.3.8
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   dallinger
@@ -285,7 +306,7 @@ psycopg2==2.9.10
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   dallinger
     #   sqlalchemy-postgres-copy
-psynet @ git+https://gitlab.com/PsyNetDev/PsyNet@master
+psynet==12.1.0
     # via -r requirements.txt
 ptyprocess==0.7.0
     # via
@@ -315,6 +336,8 @@ pyopenssl==25.1.0
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   dallinger
+pyparsing==3.2.3
+    # via matplotlib
 pyproject-hooks==1.2.0
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
@@ -343,6 +366,7 @@ python-dateutil==2.9.0.post0
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   botocore
     #   heroku3
+    #   matplotlib
     #   pandas
 python-gettext==5.0
     # via psynet
@@ -375,6 +399,8 @@ s3transfer==0.12.0
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
     #   boto3
+scipy==1.15.3
+    # via -r requirements.txt
 selenium==4.32.0
     # via
     #   -c https://raw.githubusercontent.com/Dallinger/Dallinger/v11.3.1/dev-requirements.txt
@@ -439,7 +465,7 @@ timeago==1.0.16
     #   dallinger
 tomlkit==0.13.3
     # via psynet
-torch==2.7.1
+torch==2.8.0
     # via pyro-ppl
 tqdm==4.67.1
     # via
