@@ -509,8 +509,13 @@ class AdaptiveTesting(OptimalDesign):
         return optimal_test
 
     def outcome_probability(self, participant, trial):
-        p = float(self.p_y.get((participant.id, trial.node.id), None))
-        return {0: 1 - p, 1: p}
+        p = self.p_y.get((participant.id, trial.node.id), None)
+        if p is None:
+            return None
+        else:
+            logger.info(p)
+            p = float(p)
+            return {0: 1 - p, 1: p}
 
 
 class KnowledgeTrial(StaticTrial):
@@ -737,8 +742,13 @@ class ActiveInference(OptimalDesign):
         self.p_y = dict()
 
     def outcome_probability(self, participant, trial):
-        p = float(self.p_y.get((participant.id, trial.node.id), None))
-        return {0: 1 - p, 1: p}
+        p = self.p_y.get((participant.id, trial.node.id), None)
+        if p is None:
+            return None
+        else:
+            logger.info(p)
+            p = float(p)
+            return {0: 1 - p, 1: p}
 
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
@@ -799,7 +809,7 @@ class ActiveInference(OptimalDesign):
             p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
 
             # P(y=1|z_i)
-            self.p_y[(participant.id, node_id)] = (alpha / (alpha + beta))[z_i]
+            self.p_y[(participant.id, node_id)] = (alpha / (alpha + beta))[z_i,0]
 
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
@@ -853,7 +863,6 @@ class ActiveInference(OptimalDesign):
         )[0]
 
         if len(nodes_ids) == 15:
-            logger.info("Saving")
             with open("output/utility.csv", "a", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(
@@ -873,12 +882,12 @@ def get_prolific_settings(experiment_duration):
 
     return {
         "recruiter": "prolific",
-        "base_payment": 9 * DURATION_ESTIMATE / 60 / 60,
+        "base_payment": 12 * DURATION_ESTIMATE / 60 / 60,
         "prolific_estimated_completion_minutes": DURATION_ESTIMATE / 60,
         "prolific_recruitment_config": qualification,
         "auto_recruit": False,
         "wage_per_hour": 0,
-        "currency": "£",
+        "currency": "$",
         "show_reward": False,
     }
 
@@ -903,25 +912,12 @@ class Exp(psynet.experiment.Experiment):
     config = {
         "recruiter": RECRUITER,
         "wage_per_hour": 0,
-        # "publish_experiment": False,
-        "title": (
-            "Trivia questions (Chrome browser, ~8 minutes to complete, ~2£)"
-        ),
-        "description": " ".join(
-            [
-                "This experiment requires you to answer a few trivia questions.",
-                "We recommend opening the experiment in an incognito window in Chrome, as some browser add-ons can interfere with the experiment.",
-                "If you have any questions or concerns, please contact us through Prolific.",
-            ]
-        ),
         "initial_recruitment_size": 10,
         "auto_recruit": False,
         "show_reward": False,
-        "contact_email_on_error": "lucas.gautheron@gmail.com",
-        "organization_name": "Max Planck Institute for Empirical Aesthetics",
     }
 
-    if MODE != "HOTAIR":
+    if RECRUITER != "hotair":
         config.update(**recruiter_settings)
 
     timeline = Timeline(
