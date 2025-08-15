@@ -160,6 +160,7 @@ adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
 
 
 def plot_predictive_check(df):
+    df = df.head(int(0.5*len(df)))
     fig, ax = plt.subplots(figsize=(3.2, 2.333))
 
     ax.scatter(df["p"], df["y"], alpha=0.075, s=5, edgecolors="black", lw=0.2)

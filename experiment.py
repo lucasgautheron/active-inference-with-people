@@ -34,7 +34,7 @@ from scipy.stats import norm
 import pandas as pd
 import csv
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 SETUP = "adaptive"
 
 assert SETUP in ["adaptive", "oracle"]
