@@ -1,3 +1,7 @@
+import pandas as pd
+import numpy as np
+import json
+
 import matplotlib.pyplot as plt
 import matplotlib
 import matplotlib.cm as cm
@@ -17,9 +21,7 @@ matplotlib.rcParams["text.latex.preamble"] = (
 
 import seaborn as sns
 
-import pandas as pd
-import numpy as np
-import json
+from scipy.stats import beta as beta_dist
 
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import PolynomialFeatures
