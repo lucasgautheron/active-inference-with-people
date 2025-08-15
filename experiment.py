@@ -893,7 +893,7 @@ class Exp(psynet.experiment.Experiment):
         KnowledgeTrialMaker(
             id_="optimal_treatment",
             optimizer_class=ActiveInference if SETUP == "adaptive" else None,  # Active inference w/ a prior preference over outcomes
-            domain=0,  # questions about the solar system
+            domain=1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
             max_trials_per_participant=5,

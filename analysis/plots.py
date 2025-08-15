@@ -113,7 +113,7 @@ def plot_predictive_check(df):
 
     ax.plot([0, 1], [0, 1], color="black")
 
-    ax.set_xlabel("$p(y=1)$\n(Model posterior prediction)")
+    ax.set_xlabel("$q(y=1)$\n(Model posterior prediction)")
     ax.set_ylabel("$y$\n(Actual answer)")
 
     fig.savefig("output/evaluation_test.pdf", bbox_inches="tight")
