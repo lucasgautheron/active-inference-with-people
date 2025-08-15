@@ -35,11 +35,15 @@ import pandas as pd
 import csv
 
 DEBUG_MODE = True
+SETUP = "adaptive"
+
+assert SETUP in ["adaptive", "oracle"]
 
 logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 logger = logging.getLogger()
+
 
 
 class Oracle:
@@ -886,53 +890,21 @@ class Exp(psynet.experiment.Experiment):
                 ),
             )
         ),
-        # KnowledgeTrialMaker(
-        #     id_="optimal_treatment",
-        #     optimizer_class=ActiveInference,  # Active inference w/ a prior preference over outcomes
-        #     domain=0,  # questions about the solar system
-        #     use_participant_data=True,  # optimization requires participant metadata
-        #     expected_trials_per_participant=5,
-        #     max_trials_per_participant=5,
-        # ),
-        # KnowledgeTrialMaker(
-        #     id_="optimal_test",
-        #     optimizer_class=AdaptiveTesting,  # Bayesian adaptive design w/ an item-response model
-        #     domain=0,  # questions about the solar system
-        #     use_participant_data=False,  # optimization does not require participant metadata
-        #     expected_trials_per_participant=15,
-        #     max_trials_per_participant=15,
-        # ),
         KnowledgeTrialMaker(
             id_="optimal_treatment",
-            optimizer_class=None,  # Active inference w/ a prior preference over outcomes
+            optimizer_class=ActiveInference if SETUP == "adaptive" else None,  # Active inference w/ a prior preference over outcomes
             domain=0,  # questions about the solar system
             use_participant_data=True,  # optimization requires participant metadata
-            expected_trials_per_participant=15,
-            max_trials_per_participant=15,
+            expected_trials_per_participant=5,
+            max_trials_per_participant=5,
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
-            optimizer_class=None,  # Bayesian adaptive design w/ an item-response model
+            optimizer_class=AdaptiveTesting if SETUP == "adaptive" else None,  # Bayesian adaptive design w/ an item-response model
             domain=0,  # questions about the solar system
             use_participant_data=False,  # optimization does not require participant metadata
             expected_trials_per_participant=15,
             max_trials_per_participant=15,
         ),
-        # KnowledgeTrialMaker(
-        #     id_="optimal_treatment",
-        #     optimizer_class=None,  # Active inference w/ a prior preference over outcomes
-        #     domain=0,  # questions about the solar system
-        #     use_participant_data=True,  # optimization requires participant metadata
-        #     expected_trials_per_participant=5,
-        #     max_trials_per_participant=5,
-        # ),
-        # KnowledgeTrialMaker(
-        #     id_="optimal_test",
-        #     optimizer_class=None,  # Bayesian adaptive design w/ an item-response model
-        #     domain=0,  # questions about the solar system
-        #     use_participant_data=False,  # optimization does not require participant metadata
-        #     expected_trials_per_participant=9,
-        #     max_trials_per_participant=9,
-        # ),
         SuccessfulEndPage(),
     )
