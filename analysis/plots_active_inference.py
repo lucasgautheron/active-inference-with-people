@@ -160,65 +160,75 @@ adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
 def plot_predictive_check(df):
     fig, ax = plt.subplots(figsize=(3.2, 2.333))
 
-    sns.scatterplot(data=df, x="p", y="y", alpha=0.5, s=5)
-    X_smooth = np.linspace(0, 1, 100).reshape(-1, 1)
+    ax.scatter(df["p"], df["y"], alpha=0.075, s=5, edgecolors="black", lw=0.2)
 
-    # Fit GLM with splines (similar to R's glm with ns(x, 5))
-    X = df["p"].values[:, np.newaxis]
-    y = df["y"]
+    n_bins = 8
+    bin_boundaries = np.linspace(0, 1, n_bins + 1)
+    bin_lowers = bin_boundaries[:-1]
+    bin_uppers = bin_boundaries[1:]
+    bin_centers = (bin_lowers + bin_uppers) / 2
 
-    # Create polynomial features (degree 2)
-    poly_features = PolynomialFeatures(degree=6, include_bias=True)
-    X_poly = poly_features.fit_transform(X)
-    X_smooth_poly = poly_features.transform(X_smooth)
+    observed_freqs = []
+    ci_lowers = []
+    ci_uppers = []
+    bin_counts = []
 
-    print(X_poly)
+    for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
+        # Get data points in this bin
+        in_bin = (df["p"] >= bin_lower) & (df["p"] < bin_upper)
+        if bin_upper == 1.0:  # Include the upper boundary for the last bin
+            in_bin = (df["p"] >= bin_lower) & (df["p"] <= bin_upper)
 
-    # Fit linear regression with polynomial features
-    poly_model = LogisticRegression()
-    poly_model.fit(X_poly, y)
+        bin_data = df[in_bin]
+        n_in_bin = len(bin_data)
+        bin_counts.append(n_in_bin)
 
-    predictions = []
-    for _ in range(2000):
-        # Resample the data
-        X_boot, y_boot = resample(X_poly, y, random_state=None)
+        if n_in_bin > 0:
+            n_successes = bin_data["y"].sum()
+            n_failures = (1-bin_data["y"]).sum()
 
-        # Fit model on bootstrap sample
-        model = LogisticRegression()
-        model.fit(X_boot, y_boot)
+            # Calculate observed frequency
+            observed_freq = (1+n_successes)/(2+n_successes+n_failures)
+            observed_freqs.append(observed_freq)
 
-        # Predict on smooth grid
-        y_pred = model.predict_proba(X_smooth_poly)
-        predictions.append(y_pred[:, 1])
+            if n_in_bin > 0:
+                conf_int = beta_dist.ppf([0.05/2, 1-0.05/2], 1+n_successes, 1+n_failures)
+                ci_lowers.append(conf_int[0])
+                ci_uppers.append(conf_int[1])
+            else:
+                ci_lowers.append(observed_freq)
+                ci_uppers.append(observed_freq)
+        else:
+            observed_freqs.append(np.nan)
+            ci_lowers.append(np.nan)
+            ci_uppers.append(np.nan)
 
-    # Calculate confidence intervals
-    mean_pred = np.mean(predictions, axis=0)
-    std_pred = np.std(predictions, axis=0)
-    ci_lower = np.percentile(predictions, 2.5, axis=0)
-    ci_upper = np.percentile(predictions, 97.5, axis=0)
+    observed_freqs = np.array(observed_freqs)
+    ci_lowers = np.array(ci_lowers)
+    ci_uppers = np.array(ci_uppers)
+    bin_counts = np.array(bin_counts)
 
-    # Plot the regression line and uncertainty
-    ax.plot(
-        X_smooth.flatten(),
-        mean_pred,
-        linewidth=2,
-        color="#377eb8",
-        label="Polynomial fit",
-    )
-    ax.fill_between(
-        X_smooth.flatten(),
-        ci_lower,
-        ci_upper,
-        alpha=0.2,
-        color="#377eb8",
-        label="95% CI",
-    )
+    has_data = ~np.isnan(observed_freqs) & (bin_counts > 0)
 
-    # Add diagonal reference line
+    if np.any(has_data):
+        ax.errorbar(
+            bin_centers[has_data],
+            observed_freqs[has_data],
+            yerr=[
+                observed_freqs[has_data] - ci_lowers[has_data],
+                ci_uppers[has_data] - observed_freqs[has_data],
+            ],
+            fmt="o",
+            capsize=3,
+            capthick=1,
+            markersize=4,
+            ls="none"
+        )
+
     ax.plot([0, 1], [0, 1], color="black")
 
-    ax.set_xlabel("Model posterior prediction\n$p(y=1)$")
-    ax.set_ylabel("Actual answer\n$y$")
+    ax.set_xlabel("$p(y=1)$\n(Model posterior prediction)")
+    ax.set_ylabel("$y$\n(Actual answer)")
 
     fig.savefig("output/evaluation_treatment.pdf", bbox_inches="tight")
 
@@ -307,7 +317,7 @@ def cumulative_frequency(df, output):
     ax.set_ylabel("Cumulative frequency\nof treatment $j$\nat step $t$")
     cbar = plt.colorbar(sm, ax=ax)  # Use the ScalarMappable here
     cbar.set_label(
-        r"$E[r_j]_{greedy}$",
+        r"$E[r_j]_{oracle}$",
         rotation=90,
         labelpad=15,
     )
@@ -355,7 +365,7 @@ ax.scatter(ranks_oracle, ranks_static, label="Even sampling", s=4)
 # ax.scatter(
 #     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_static[node] for node in mean_reward.keys()], label="Even sampling", s=4
 # )
-ax.set_xlabel("Treatment rank\nin the greedy setup")
+ax.set_xlabel("Treatment rank\nin the oracle setup")
 ax.set_ylabel("Estimated treatment rank")
 
 ax.set_xticks(
@@ -556,16 +566,16 @@ df.columns = ["efe", "eig", "r"]
 ax.fill_between(
     np.arange(len(df)),
     np.zeros(len(df)),
-    df["r"] / df["efe"],
+    df["r"],
     alpha=0.5,
-    label="$E[r_{\hat{j}}]/G_{\hat{j}}$\n(exploitation)",
+    label="$E[r_{\hat{j}}]$\n(exploitation)",
 )
 ax.fill_between(
     np.arange(len(df)),
-    df["r"] / df["efe"],
-    np.ones(len(df)),
+    np.maximum(df["r"], 0),
+    np.maximum(df["r"], 0)+df["eig"],
     alpha=0.5,
-    label="$EIG(\hat{j})/G_{\hat{j}}$\n(exploration)",
+    label="$EIG(\hat{j})$\n(exploration)",
 )
 
 ax.set_xlabel("Step $t$")
