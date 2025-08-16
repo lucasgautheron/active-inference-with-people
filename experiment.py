@@ -35,7 +35,7 @@ import pandas as pd
 import csv
 import json
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
@@ -90,9 +90,6 @@ class OptimalDesign:
         pass
 
     def get_optimal_node(self, candidates, participant, data):
-        raise NotImplementedError()
-
-    def outcome_probability(self, participant, trial):
         raise NotImplementedError()
 
 
@@ -419,27 +416,28 @@ class AdaptiveTesting(OptimalDesign):
             "y",
             ["theta", "difficulties", "intercept"],
             num_samples=1000,
-            num_steps=self.num_steps * 2,
+            num_steps=self.num_steps,
             guide=self._marginal_guide,
             optim=optimizer,
             final_num_samples=10000,
         )
+
+        # Retrieve the posterior predictive probability for each design
+        p_y = torch.special.expit(pyro.param("q_logit")).detach().numpy()
+        p_outcome = dict()
+        for idx, candidate in enumerate(candidates):
+            p_outcome[candidate] = float(p_y[idx])
 
         # Find the item with maximum EIG
         best_idx = torch.argmax(eig)
         optimal_test = candidates[best_idx]
         best_eig = eig.detach().max()
 
-        # Retrieve the posterior predictive probability for each design
-        p_y = torch.special.expit(pyro.param("q_logit")).detach().numpy()
-        for idx, candidate in enumerate(candidates):
-            self.p_y[(participant.id, candidate)] = p_y[idx]
-
         # Apply early-stopping criteria
-        epsilon = 0.05
+        epsilon = 0.04
         if best_eig < epsilon:
             logger.debug("Stopping criteria met - low EIG and entropy")
-            return None
+            return None, None
 
         if DEBUG_MODE:
             entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
@@ -506,16 +504,10 @@ class AdaptiveTesting(OptimalDesign):
             )
             plt.clf()
 
-        return optimal_test
-
-    def outcome_probability(self, participant, trial):
-        p = self.p_y.get((participant.id, trial.node.id), None)
-        if p is None:
-            return None
-        else:
-            logger.info(p)
-            p = float(p)
-            return {0: 1 - p, 1: p}
+        return optimal_test, {
+            0: 1 - p_outcome[optimal_test],
+            1: p_outcome[optimal_test],
+        }
 
 
 class KnowledgeTrial(StaticTrial):
@@ -680,9 +672,11 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
-        next_node = self.optimizer.get_optimal_node(
+        next_node, p = self.optimizer.get_optimal_node(
             list(candidates.keys()), participant, data
         )
+
+        participant.var.set("p_y", p)
 
         if next_node is None:
             return []
@@ -722,10 +716,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         trial.var.z = (
             int(trial.participant.var.z) if self.use_participant_data else None
         )
-        if self.optimizer is not None:
-            trial.var.p = self.optimizer.outcome_probability(
-                trial.participant, trial
-            )
+        trial.var.p = participant.var.get("p_y", None)
 
         logger.info(trial.var)
 
@@ -741,15 +732,6 @@ class ActiveInference(OptimalDesign):
     def __init__(self):
         self.p_y = dict()
 
-    def outcome_probability(self, participant, trial):
-        p = self.p_y.get((participant.id, trial.node.id), None)
-        if p is None:
-            return None
-        else:
-            logger.info(p)
-            p = float(p)
-            return {0: 1 - p, 1: p}
-
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
@@ -758,6 +740,7 @@ class ActiveInference(OptimalDesign):
         rewards = dict()
         eig = dict()
         utility = dict()
+        p_outcome = dict()
 
         alphas = dict()
         betas = dict()
@@ -808,9 +791,6 @@ class ActiveInference(OptimalDesign):
             p_y_given_phi = phi * y + (1 - phi) * (1 - y)
             p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
 
-            # P(y=1|z_i)
-            self.p_y[(participant.id, node_id)] = (alpha / (alpha + beta))[z_i,0]
-
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
             gamma = 0.2
@@ -824,6 +804,7 @@ class ActiveInference(OptimalDesign):
             rewards[node_id] = EIG + U
             eig[node_id] = EIG
             utility[node_id] = U
+            p_outcome[node_id] = float((alpha / (alpha + beta))[z_i].mean())
 
         from matplotlib import pyplot as plt
 
@@ -856,7 +837,7 @@ class ActiveInference(OptimalDesign):
             plt.legend()
             plt.show()
 
-        best_network = sorted(
+        best_node = sorted(
             list(rewards.keys()),
             key=lambda node_id: rewards[node_id],
             reverse=True,
@@ -867,13 +848,13 @@ class ActiveInference(OptimalDesign):
                 writer = csv.writer(file)
                 writer.writerow(
                     [
-                        rewards[best_network],
-                        eig[best_network],
-                        utility[best_network],
+                        rewards[best_node],
+                        eig[best_node],
+                        utility[best_node],
                     ]
                 )
 
-        return best_network
+        return best_node, {0: 1 - p_outcome[best_node], 1: p_outcome[best_node]}
 
 
 def get_prolific_settings(experiment_duration):
@@ -954,7 +935,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domain=1,  # questions about american history
+            domain=0,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
             max_trials_per_participant=5,
