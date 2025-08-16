@@ -113,8 +113,8 @@ class AdaptiveTesting(OptimalDesign):
         self.intercept_sd = torch.tensor(0.0)
 
         # EIG computation parameters
-        self.num_steps = 1000 if DEBUG_MODE else 750
-        self.start_lr = 0.1 if DEBUG_MODE else 0.02
+        self.num_steps = 1000 if DEBUG_MODE else 800
+        self.start_lr = 0.1 if DEBUG_MODE else 0.2
         self.end_lr = 0.001 if DEBUG_MODE else 0.01
 
         # Posterior predictive probability of outcome
@@ -928,7 +928,7 @@ class Exp(psynet.experiment.Experiment):
                             "graduate_school",
                             "postgraduate_degree_or_higher",
                         ]
-                    )
+                    )*1
                 ),
             )
         ),
@@ -937,7 +937,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domain=1,  # questions about american history
+            domain=0,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
             max_trials_per_participant=5,
