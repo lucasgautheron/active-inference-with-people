@@ -113,9 +113,9 @@ class AdaptiveTesting(OptimalDesign):
         self.intercept_sd = torch.tensor(0.0)
 
         # EIG computation parameters
-        self.num_steps = 1000
-        self.start_lr = 0.1
-        self.end_lr = 0.001
+        self.num_steps = 1000 if DEBUG_MODE else 750
+        self.start_lr = 0.1 if DEBUG_MODE else 0.02
+        self.end_lr = 0.001 if DEBUG_MODE else 0.01
 
         # Posterior predictive probability of outcome
         self.p_y = dict()
@@ -373,7 +373,7 @@ class AdaptiveTesting(OptimalDesign):
         for i in range(self.num_steps):
             elbo = svi.step(participants, items)
             if i % 100 == 0:
-                logger.debug(f"  Iteration {i}, ELBO: {elbo:.3f}")
+                logger.info(f"  Iteration {i}, ELBO: {elbo:.3f}")
 
         # Extract parameters
         self.theta_means = pyro.param("theta_means").detach().clone()
@@ -712,7 +712,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         experiment,
         participant,
     ):
-        trial.var.y = trial.answer.lower() in trial.node.definition["answers"]
+        trial.var.y = (
+            trial.answer.lower().strip() in trial.node.definition["answers"]
+        )
         trial.var.z = (
             int(trial.participant.var.z) if self.use_participant_data else None
         )
