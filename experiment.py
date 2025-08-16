@@ -35,7 +35,7 @@ import pandas as pd
 import csv
 import json
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
@@ -935,7 +935,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domain=0,  # questions about american history
+            domain=1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
             max_trials_per_participant=5,
