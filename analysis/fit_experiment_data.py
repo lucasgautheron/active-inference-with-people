@@ -175,7 +175,7 @@ def main():
     # 1. Load and prepare data
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
-            "output/KnowledgeTrial_adaptive.csv",
+            "output/KnowledgeTrial_adaptive_fast.csv",
         )
     )
     fit, stan_data = fit_irt_model(
@@ -189,7 +189,7 @@ def main():
 
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
-            "output/KnowledgeTrial_oracle.csv",
+            "output/KnowledgeTrial_oracle_fast.csv",
         )
     )
     fit, stan_data = fit_irt_model(
@@ -202,7 +202,7 @@ def main():
 
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
-            "output/KnowledgeTrial_oracle.csv",
+            "output/KnowledgeTrial_oracle_fast.csv",
             samples=n_adaptive_responses
         )
     )

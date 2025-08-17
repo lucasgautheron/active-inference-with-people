@@ -37,10 +37,13 @@ def load_df(source, samples=None):
         else None
     )
 
-    df["z"] = df["z"].map(lambda s: json.loads(s)["value"])
+    df["z"] = df["z"].astype(int)
+    # df["z"] = df["z"].map(lambda s: json.loads(s)["value"])
 
     if samples is not None:
         df = df.groupby("participant_id").sample(samples)
+
+    print(df)
 
     return df
 
@@ -56,8 +59,6 @@ def expected_free_energy(df):
         int: ID of the best node selected by Active inference
     """
     n_samples = 100000
-
-    print(df)
 
     # Convert string boolean values to actual booleans
     df = df.copy()
@@ -133,7 +134,7 @@ def expected_free_energy(df):
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
         p_z = z.mean()
-        gamma = 0.2
+        gamma = 0.1
         U = gamma * np.mean(
             p_z * y[1]
             + (1 - p_z) * (1 - y[0])
@@ -145,18 +146,12 @@ def expected_free_energy(df):
         eig[node_id] = EIG
         utility[node_id] = U
 
-        print(
-            node_id,
-            rewards[node_id],
-            eig[node_id],
-            utility[node_id],
-        )
 
     return utility, eig, utility
 
 
 # Load the data
-adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
+adaptive = load_df("output/KnowledgeTrial_adaptive_fast.csv")
 
 
 def plot_predictive_check(df):
@@ -238,8 +233,8 @@ def plot_predictive_check(df):
 
 plot_predictive_check(adaptive)
 
-oracle = load_df("output/KnowledgeTrial_oracle.csv")
-static = load_df("output/KnowledgeTrial_oracle.csv", samples=5)
+oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
+static = load_df("output/KnowledgeTrial_oracle_fast.csv", samples=5)
 
 rewards_oracle, eig_oracle, utility_oracle = expected_free_energy(oracle)
 rewards_adaptive, eig_adaptive, utility_adaptive = expected_free_energy(
@@ -354,10 +349,13 @@ ranks_oracle = get_rank(mean_reward, nodes)
 ranks_adaptive = get_rank(mean_reward_adaptive, nodes)
 ranks_static = get_rank(mean_reward_static, nodes)
 
+print("Oracle:")
+print(mean_reward)
 print("Active:")
 print(mean_reward_adaptive)
 print("Random:")
 print(mean_reward_static)
+
 
 ax.plot([1, 15], [1, 15], color="black", zorder=0)
 ax.scatter(ranks_oracle, ranks_adaptive, label="Active inference")
@@ -563,7 +561,7 @@ plot_y_distributions_by_z(adaptive, mean_reward_adaptive)
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
-df = pd.read_csv("output/utility.csv")
+df = pd.read_csv("output/utility_adaptive.csv")
 df.columns = ["efe", "eig", "r"]
 
 ax.fill_between(
