@@ -7,7 +7,8 @@ from markupsafe import Markup
 import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import Timeline, CodeBlock
+from psynet.timeline import Timeline, CodeBlock, ModuleState
+from psynet.participant import Participant
 from psynet.trial.main import Trial
 from psynet.trial.static import (
     StaticNode,
@@ -20,7 +21,8 @@ from psynet.demography.general import (
 )
 from psynet.utils import log_time_taken
 
-from sqlalchemy.orm import joinedload
+from dallinger import db
+from sqlalchemy.orm import selectinload
 
 import torch
 import pyro
@@ -637,30 +639,37 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
     @log_time_taken
     def prior_data(self, experiment):
+        import time
+
         data = {"nodes": dict(), "participants": dict()}
 
         # Fetch all nodes related to this trial maker
+        start = time.time()
         nodes = self.network_class.query.filter_by(
             trial_maker_id=self.id, full=False, failed=False
         ).all()
+        logger.info(f"Nodes query: {time.time() - start:.3f}s")
 
         # Fetch all trials that belong to this trial maker
+        start = time.time()
         trials = Trial.query.filter(
             Trial.failed == False,
             Trial.is_repeat_trial == False,
             Trial.trial_maker_id == self.id
-        ).options(joinedload(Trial.participant)).all()
+        ).options(selectinload(Trial.participant)).all()
+        logger.info(f"Trials query: {time.time() - start:.3f}s")
 
+        start = time.time()
         trials_by_node = {}
         for trial in trials:
             if trial.node_id not in trials_by_node:
                 trials_by_node[trial.node_id] = []
             trials_by_node[trial.node_id].append(trial)
-        
+
         # Process trials for each node
         for node in nodes:
             data["nodes"][node.id] = {}
-            
+
             if node.id in trials_by_node:
                 data["nodes"][node.id] = {
                     trial.id: {
@@ -674,6 +683,13 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     }
                     for trial in trials_by_node[node.id]
                 }
+        logger.info(f"Processing nodes: {time.time() - start:.3f}s")
+
+        start = time.time()
+        participants = db.session.query(Participant).join(Participant._module_states).filter(
+            ModuleState.module_id == self.id,
+            ModuleState.started == True
+        ).distinct().all()
 
         data["participants"] = {
             participant.id: {
@@ -683,8 +699,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     else None
                 ),
             }
-            for participant in self.started_participants
+            for participant in participants
         }
+        logger.info(f"Processing participants: {time.time() - start:.3f}s")
 
         return data
 
