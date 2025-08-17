@@ -8,7 +8,6 @@ import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
 from psynet.timeline import Timeline, CodeBlock
-from psynet.participant import Participant
 from psynet.trial.static import (
     StaticNode,
     StaticTrial,
@@ -18,6 +17,7 @@ from psynet.consent import MainConsent
 from psynet.demography.general import (
     FormalEducation,
 )
+from psynet.utils import log_time_taken
 
 import torch
 import pyro
@@ -28,14 +28,13 @@ from pyro.contrib.oed.eig import marginal_eig
 from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
 
-from matplotlib import pyplot as plt
-from scipy.stats import norm
+from scipy.stats import norm, beta as beta_dist
 
 import pandas as pd
 import csv
 import json
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
@@ -113,9 +112,12 @@ class AdaptiveTesting(OptimalDesign):
         self.intercept_sd = torch.tensor(0.0)
 
         # EIG computation parameters
-        self.num_steps = 1000 if DEBUG_MODE else 800
-        self.start_lr = 0.1 if DEBUG_MODE else 0.2
-        self.end_lr = 0.001 if DEBUG_MODE else 0.01
+        # self.num_steps = 1000 if DEBUG_MODE else 300
+        # self.start_lr = 0.1 if DEBUG_MODE else 0.1
+        # self.end_lr = 0.001 if DEBUG_MODE else 0.001
+        self.num_steps = 300
+        self.start_lr = 0.1
+        self.end_lr = 0.001
 
         # Posterior predictive probability of outcome
         self.p_y = dict()
@@ -415,7 +417,7 @@ class AdaptiveTesting(OptimalDesign):
             candidate_designs,
             "y",
             ["theta", "difficulties", "intercept"],
-            num_samples=1000,
+            num_samples=100,
             num_steps=self.num_steps,
             guide=self._marginal_guide,
             optim=optimizer,
@@ -433,13 +435,15 @@ class AdaptiveTesting(OptimalDesign):
         optimal_test = candidates[best_idx]
         best_eig = eig.detach().max()
 
-        # Apply early-stopping criteria
+        # Apply the early-stopping criterion
         epsilon = 0.04
         if best_eig < epsilon:
-            logger.debug("Stopping criteria met - low EIG and entropy")
+            logger.info("Early stopping")
             return None, None
 
         if DEBUG_MODE:
+            from matplotlib import pyplot as plt
+
             entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
 
             x = np.linspace(-3, +3, 200)
@@ -631,6 +635,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return nodes
 
+    @log_time_taken
     def prior_data(self, experiment):
         data = {"nodes": dict(), "participants": dict()}
 
@@ -663,11 +668,12 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     else None
                 ),
             }
-            for participant in Participant.query.all()
+            for participant in self.started_participants
         }
 
         return data
 
+    @log_time_taken
     def prioritize_nodes(self, nodes, participant, experiment):
         candidates = {node.id: node for node in nodes}
 
@@ -737,7 +743,7 @@ class ActiveInference(OptimalDesign):
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
-        S = 2000
+        S = 1000
 
         rewards = dict()
         eig = dict()
@@ -795,7 +801,7 @@ class ActiveInference(OptimalDesign):
 
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
-            gamma = 0.2
+            gamma = 0.1
             U = gamma * np.mean(
                 p_z * y[1]
                 + (1 - p_z) * (1 - y[0])
@@ -807,37 +813,6 @@ class ActiveInference(OptimalDesign):
             eig[node_id] = EIG
             utility[node_id] = U
             p_outcome[node_id] = float((alpha / (alpha + beta))[z_i].mean())
-
-        from matplotlib import pyplot as plt
-
-        if np.random.uniform() > 1 and len(nodes_ids) == 15:
-            cmap = plt.get_cmap("tab10")
-            fig, ax = plt.subplots()
-            for node_id in nodes_ids:
-                color = cmap(node_id % 10)
-                x = np.linspace(0, 1, 100)
-                ax.plot(
-                    x,
-                    beta_dist.pdf(
-                        x,
-                        a=alphas[node_id][0],
-                        b=betas[node_id][0],
-                    ),
-                    color=color,
-                    label=rewards[node_id],
-                )
-                ax.plot(
-                    x,
-                    beta_dist.pdf(
-                        x,
-                        a=alphas[node_id][1],
-                        b=betas[node_id][1],
-                    ),
-                    color=color,
-                    ls="dashed",
-                )
-            plt.legend()
-            plt.show()
 
         best_node = sorted(
             list(rewards.keys()),
@@ -928,7 +903,8 @@ class Exp(psynet.experiment.Experiment):
                             "graduate_school",
                             "postgraduate_degree_or_higher",
                         ]
-                    )*1
+                    )
+                    * 1
                 ),
             )
         ),
@@ -937,7 +913,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domain=0,  # questions about american history
+            domain=0 if DEBUG_MODE else 1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5,
             max_trials_per_participant=5,
