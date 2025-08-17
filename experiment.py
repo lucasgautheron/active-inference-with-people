@@ -8,6 +8,7 @@ import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
 from psynet.timeline import Timeline, CodeBlock
+from psynet.trial.main import Trial
 from psynet.trial.static import (
     StaticNode,
     StaticTrial,
@@ -115,7 +116,7 @@ class AdaptiveTesting(OptimalDesign):
         # self.num_steps = 1000 if DEBUG_MODE else 300
         # self.start_lr = 0.1 if DEBUG_MODE else 0.1
         # self.end_lr = 0.001 if DEBUG_MODE else 0.001
-        self.num_steps = 300
+        self.num_steps = 400
         self.start_lr = 0.1
         self.end_lr = 0.001
 
@@ -636,25 +637,40 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     def prior_data(self, experiment):
         data = {"nodes": dict(), "participants": dict()}
 
+        # Fetch all nodes related to this trial maker
         nodes = self.network_class.query.filter_by(
             trial_maker_id=self.id, full=False, failed=False
-        )
+        ).all()
 
+        # Fetch all trials that belong to this trial maker
+        trials = Trial.query.filter(
+            Trial.failed == False,
+            Trial.is_repeat_trial == False,
+            Trial.trial_maker_id == self.id
+        ).all()
+
+        trials_by_node = {}
+        for trial in trials:
+            if trial.node_id not in trials_by_node:
+                trials_by_node[trial.node_id] = []
+            trials_by_node[trial.node_id].append(trial)
+        
+        # Process trials for each node
         for node in nodes:
-            data["nodes"][node.id] = dict()
-
-            for trial in node.head.viable_trials:
-                y = trial.var.get("y")
-                z = (
-                    trial.participant.var.get("z", None)
-                    if self.use_participant_data
-                    else None
-                )
-
-                data["nodes"][node.id][trial.id] = {
-                    "y": y,
-                    "z": z,
-                    "participant_id": trial.participant.id,
+            data["nodes"][node.id] = {}
+            
+            if node.id in trials_by_node:
+                data["nodes"][node.id] = {
+                    trial.id: {
+                        "y": trial.var.get("y"),
+                        "z": (
+                            trial.participant.var.get("z", None)
+                            if self.use_participant_data
+                            else None
+                        ),
+                        "participant_id": trial.participant.id,
+                    }
+                    for trial in trials_by_node[node.id]
                 }
 
         data["participants"] = {
@@ -737,7 +753,7 @@ class ActiveInference(OptimalDesign):
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
-        S = 1000
+        S = 2000
 
         rewards = dict()
         eig = dict()
@@ -815,7 +831,7 @@ class ActiveInference(OptimalDesign):
         )[0]
 
         if len(nodes_ids) == 15:
-            with open("output/utility.csv", "a", newline="") as file:
+            with open(f"output/utility_{SETUP}.csv", "a", newline="") as file:
                 writer = csv.writer(file)
                 writer.writerow(
                     [
