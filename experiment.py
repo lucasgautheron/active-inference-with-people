@@ -119,9 +119,6 @@ class AdaptiveTesting(OptimalDesign):
         self.start_lr = 0.1
         self.end_lr = 0.001
 
-        # Posterior predictive probability of outcome
-        self.p_y = dict()
-
     def _make_design_model(self, target_participant):
         """Create a model for a specific participant
         that takes item indices as design"""
@@ -737,9 +734,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
 
 class ActiveInference(OptimalDesign):
-    def __init__(self):
-        self.p_y = dict()
-
     def get_optimal_node(self, nodes_ids, participant, data):
         z_i = participant.var.z
 
