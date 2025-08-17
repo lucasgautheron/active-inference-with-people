@@ -20,6 +20,8 @@ from psynet.demography.general import (
 )
 from psynet.utils import log_time_taken
 
+from sqlalchemy.orm import joinedload
+
 import torch
 import pyro
 import pyro.distributions as dist
@@ -647,7 +649,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             Trial.failed == False,
             Trial.is_repeat_trial == False,
             Trial.trial_maker_id == self.id
-        ).all()
+        ).options(joinedload(Trial.participant)).all()
 
         trials_by_node = {}
         for trial in trials:
