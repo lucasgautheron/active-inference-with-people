@@ -36,8 +36,8 @@ def load_df(source):
 
 
 # Load the data
-adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
-oracle = load_df("output/KnowledgeTrial_oracle.csv")
+adaptive = load_df("output/KnowledgeTrial_adaptive_fast.csv")
+oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
 static = load_df("output/KnowledgeTrial_static.csv")
 
 print(adaptive.groupby("participant_id")["node_id"].first().value_counts())
@@ -148,6 +148,8 @@ scatter = ax.scatter(
 )
 ax.set_xlabel(r"Posterior $\bar{\theta_i}$ (oracle)")
 ax.set_ylabel(r"Posterior $\bar{\theta_i}$ (adaptive)")
+
+print(np.argwhere(np.abs(theta_oracle-theta_adaptive) > 1))
 
 r2 = np.corrcoef(theta_oracle, theta_adaptive)[0, 1] ** 2
 ax.text(
