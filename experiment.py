@@ -570,6 +570,9 @@ class KnowledgeTrial(StaticTrial):
 
         return page
 
+    def score_answer(self, answer, definition):
+        return 1 if answer.lower().strip() in definition["answers"] else 0
+
     def show_feedback(self, experiment, participant):
         return InfoPage(
             (
@@ -672,14 +675,11 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # Fetch all trials that belong to this trial maker
         start = time.time()
-        trials = (
-            Trial.query.filter(
-                Trial.failed == False,
-                Trial.is_repeat_trial == False,
-                Trial.trial_maker_id == self.id,
-            )
-            .all()
-        )
+        trials = Trial.query.filter(
+            Trial.failed == False,
+            Trial.is_repeat_trial == False,
+            Trial.trial_maker_id == self.id,
+        ).all()
         logger.info(f"Trials query: {time.time() - start:.3f}s")
 
         start = time.time()
@@ -696,7 +696,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             if node.id in trials_by_node:
                 data["nodes"][node.id] = {
                     trial.id: {
-                        "y": trial.var.get("y"),
+                        "y": trial.score,
                         "z": (
                             data["participants"][trial.participant_id]["z"]
                             if self.use_participant_data
@@ -758,6 +758,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         trial.var.y = (
             trial.answer.lower().strip() in trial.node.definition["answers"]
         )
+
         trial.var.z = (
             int(trial.participant.var.z) if self.use_participant_data else None
         )
