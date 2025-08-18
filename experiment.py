@@ -923,7 +923,7 @@ class Exp(psynet.experiment.Experiment):
             lambda participant: participant.var.set(
                 "z",
                 (
-                    oracle.college(participant.id)
+                    int(oracle.college(participant.id))
                     if DEBUG_MODE
                     else (
                         participant.answer
@@ -944,8 +944,8 @@ class Exp(psynet.experiment.Experiment):
             ),  # Active inference w/ a prior preference over outcomes
             domain=0 if DEBUG_MODE else 1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
-            expected_trials_per_participant=5,
-            max_trials_per_participant=5,
+            expected_trials_per_participant=5 if SETUP == "adaptive" else 15,
+            max_trials_per_participant=5 if SETUP == "adaptive" else 15,
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
