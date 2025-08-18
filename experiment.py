@@ -118,9 +118,6 @@ class AdaptiveTesting(OptimalDesign):
         self.intercept_sd = torch.tensor(0.0)
 
         # EIG computation parameters
-        # self.num_steps = 1000 if DEBUG_MODE else 300
-        # self.start_lr = 0.1 if DEBUG_MODE else 0.1
-        # self.end_lr = 0.001 if DEBUG_MODE else 0.001
         self.num_steps = 400
         self.start_lr = 0.1
         self.end_lr = 0.001
