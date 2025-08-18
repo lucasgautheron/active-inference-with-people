@@ -23,6 +23,7 @@ from psynet.utils import log_time_taken
 
 from dallinger import db
 from sqlalchemy.orm import selectinload
+import time
 
 import torch
 import pyro
@@ -443,7 +444,7 @@ class AdaptiveTesting(OptimalDesign):
             logger.info("Early stopping")
             return None, None
 
-        if DEBUG_MODE:
+        if False:
             from matplotlib import pyplot as plt
 
             entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
@@ -639,9 +640,31 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
     @log_time_taken
     def prior_data(self, experiment):
-        import time
-
         data = {"nodes": dict(), "participants": dict()}
+
+        # List participants involved in this trial maker
+        start = time.time()
+        participants = (
+            db.session.query(Participant)
+            .join(Participant._module_states)
+            .filter(
+                ModuleState.module_id == self.id, ModuleState.started == True
+            )
+            .distinct()
+            .all()
+        )
+
+        data["participants"] = {
+            participant.id: {
+                "z": (
+                    participant.var.get("z", None)
+                    if self.use_participant_data
+                    else None
+                ),
+            }
+            for participant in participants
+        }
+        logger.info(f"Processing participants: {time.time() - start:.3f}s")
 
         # Fetch all nodes related to this trial maker
         start = time.time()
@@ -652,11 +675,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # Fetch all trials that belong to this trial maker
         start = time.time()
-        trials = Trial.query.filter(
-            Trial.failed == False,
-            Trial.is_repeat_trial == False,
-            Trial.trial_maker_id == self.id
-        ).options(selectinload(Trial.participant)).all()
+        trials = (
+            Trial.query.filter(
+                Trial.failed == False,
+                Trial.is_repeat_trial == False,
+                Trial.trial_maker_id == self.id,
+            )
+            .all()
+        )
         logger.info(f"Trials query: {time.time() - start:.3f}s")
 
         start = time.time()
@@ -675,33 +701,15 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     trial.id: {
                         "y": trial.var.get("y"),
                         "z": (
-                            trial.participant.var.get("z", None)
+                            data["participants"][trial.participant_id]["z"]
                             if self.use_participant_data
                             else None
                         ),
-                        "participant_id": trial.participant.id,
+                        "participant_id": trial.participant_id,
                     }
                     for trial in trials_by_node[node.id]
                 }
         logger.info(f"Processing nodes: {time.time() - start:.3f}s")
-
-        start = time.time()
-        participants = db.session.query(Participant).join(Participant._module_states).filter(
-            ModuleState.module_id == self.id,
-            ModuleState.started == True
-        ).distinct().all()
-
-        data["participants"] = {
-            participant.id: {
-                "z": (
-                    participant.var.get("z", None)
-                    if self.use_participant_data
-                    else None
-                ),
-            }
-            for participant in participants
-        }
-        logger.info(f"Processing participants: {time.time() - start:.3f}s")
 
         return data
 
