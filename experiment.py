@@ -40,7 +40,7 @@ import pandas as pd
 import csv
 import json
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
@@ -516,7 +516,7 @@ class AdaptiveTesting(OptimalDesign):
 
 class KnowledgeTrial(StaticTrial):
     time_estimate = (
-        20  # how long it should take to complete each trial, in seconds
+        25  # how long it should take to complete each trial, in seconds
     )
 
     def __init__(
@@ -679,6 +679,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             Trial.failed == False,
             Trial.is_repeat_trial == False,
             Trial.trial_maker_id == self.id,
+            Trial.score != None
         ).all()
         logger.info(f"Trials query: {time.time() - start:.3f}s")
 
@@ -870,7 +871,7 @@ class ActiveInference(OptimalDesign):
 
 
 def get_prolific_settings(experiment_duration):
-    with open("pt_prolific_en.json", "r") as f:
+    with open("qualification_prolific_en.json", "r") as f:
         qualification = json.dumps(json.load(f))
 
     return {
@@ -923,7 +924,7 @@ class Exp(psynet.experiment.Experiment):
                 f"<div style='margin: 10px;'>If you do not know the answer to a question, just skip to the next question.</div>"
                 f"<div style='margin: 10px;'>Please do <i>not</i> write your answer as sentences. For instance, if the question is: what is the current year? Please just answer '2025'. Do <i>NOT</i> answer, say, 'The current year is 2025'. </div>"
             ),
-            time_estimate=5,
+            time_estimate=15,
         ),
         CodeBlock(
             lambda participant: participant.var.set(
