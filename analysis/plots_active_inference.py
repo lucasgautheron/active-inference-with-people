@@ -41,7 +41,23 @@ def load_df(source, samples=None):
     # df["z"] = df["z"].map(lambda s: json.loads(s)["value"])
 
     if samples is not None:
-        df = df.groupby("participant_id").sample(samples)
+        rows = []
+        counter = {node: 0 for node in df["node_id"].unique()}
+        for participant_id in df["participant_id"].unique():
+            nodes = sorted(counter.keys(), key=lambda node: counter[node])[
+                :samples
+            ]
+            rows.append(
+                df[
+                    (df["participant_id"] == participant_id)
+                    & (df["node_id"].isin(nodes))
+                ]
+            )
+            for node in nodes:
+                counter[node] += 1
+
+        df = pd.concat(rows)
+        print(df)
 
     print(df)
 
@@ -135,27 +151,26 @@ def expected_free_energy(df):
 
         p_z = z.mean()
         gamma = 0.1
-        U = gamma * np.mean(
-            p_z * y[1]
-            + (1 - p_z) * (1 - y[0])
-            - p_z * (1 - y[1])
-            - (1 - p_z) * y[0]
+        U = gamma * (
+            p_z * phi[1]
+            + (1 - p_z) * (1 - phi[0])
+            - p_z * (1 - phi[1])
+            - (1 - p_z) * phi[0]
         )
 
         rewards[node_id] = EIG + U
         eig[node_id] = EIG
         utility[node_id] = U
 
-
-    return utility, eig, utility
+    return utility
 
 
 # Load the data
-adaptive = load_df("output/KnowledgeTrial_adaptive_fast.csv")
+adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
 
 
 def plot_predictive_check(df):
-    df = df.head(int(0.5*len(df)))
+    df = df.head(int(0.5 * len(df)))
     fig, ax = plt.subplots(figsize=(3.2, 2.333))
 
     ax.scatter(df["p"], df["y"], alpha=0.075, s=5, edgecolors="black", lw=0.2)
@@ -183,14 +198,16 @@ def plot_predictive_check(df):
 
         if n_in_bin > 0:
             n_successes = bin_data["y"].sum()
-            n_failures = (1-bin_data["y"]).sum()
+            n_failures = (1 - bin_data["y"]).sum()
 
             # Calculate observed frequency
-            observed_freq = (1+n_successes)/(2+n_successes+n_failures)
+            observed_freq = (1 + n_successes) / (2 + n_successes + n_failures)
             observed_freqs.append(observed_freq)
 
             if n_in_bin > 0:
-                conf_int = beta_dist.ppf([0.05/2, 1-0.05/2], 1+n_successes, 1+n_failures)
+                conf_int = beta_dist.ppf(
+                    [0.05 / 2, 1 - 0.05 / 2], 1 + n_successes, 1 + n_failures
+                )
                 ci_lowers.append(conf_int[0])
                 ci_uppers.append(conf_int[1])
             else:
@@ -220,7 +237,7 @@ def plot_predictive_check(df):
             capsize=3,
             capthick=1,
             markersize=4,
-            ls="none"
+            ls="none",
         )
 
     ax.plot([0, 1], [0, 1], color="black")
@@ -236,11 +253,9 @@ plot_predictive_check(adaptive)
 oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
 static = load_df("output/KnowledgeTrial_oracle_fast.csv", samples=5)
 
-rewards_oracle, eig_oracle, utility_oracle = expected_free_energy(oracle)
-rewards_adaptive, eig_adaptive, utility_adaptive = expected_free_energy(
-    adaptive
-)
-rewards_static, eig_static, utility_static = expected_free_energy(static)
+rewards_oracle = expected_free_energy(oracle)
+rewards_adaptive = expected_free_energy(adaptive)
+rewards_static = expected_free_energy(static)
 
 mean_reward = {
     node: np.mean(rewards_oracle[node]) for node in rewards_oracle.keys()
@@ -262,21 +277,6 @@ order = sorted(
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 nodes = list(mean_reward.keys())
-# counts = (adaptive.groupby("node_id")["id"].count())[nodes]
-# rewards = np.array(list(mean_reward.values()))
-# low_rewards = np.array(list(low_reward.values()))
-# high_rewards = np.array(list(high_reward.values()))
-# ax.scatter(rewards, counts)
-# ax.errorbar(
-#     rewards,
-#     counts,
-#     xerr=(rewards - low_rewards, high_rewards - rewards),
-#     ls="none",
-#     alpha=0.5,
-# )
-# ax.set_xlabel("$E[r_j]$ (Expected reward for $j$)")
-# ax.set_ylabel("Number of trials $n_j$")
-# plt.show()
 
 
 def cumulative_frequency(df, output):
@@ -329,12 +329,28 @@ def cumulative_frequency(df, output):
 cumulative_frequency(adaptive, "output/cumulative_node_frequency")
 cumulative_frequency(static, "output/cumulative_node_frequency_random")
 
-fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 mean_reward_adaptive = {
     node: np.mean(rewards_adaptive[node]) for node in rewards_adaptive.keys()
 }
 mean_reward_static = {
     node: np.mean(rewards_static[node]) for node in rewards_static.keys()
+}
+low_reward_adaptive = {
+    node: np.quantile(rewards_adaptive[node], q=0.05 / 2)
+    for node in rewards_adaptive.keys()
+}
+low_reward_static = {
+    node: np.quantile(rewards_static[node], q=0.05 / 2)
+    for node in rewards_static.keys()
+}
+
+high_reward_adaptive = {
+    node: np.quantile(rewards_adaptive[node], q=1 - 0.05 / 2)
+    for node in rewards_adaptive.keys()
+}
+high_reward_static = {
+    node: np.quantile(rewards_static[node], q=1 - 0.05 / 2)
+    for node in rewards_static.keys()
 }
 
 nodes = rewards_oracle.keys()
@@ -349,23 +365,11 @@ ranks_oracle = get_rank(mean_reward, nodes)
 ranks_adaptive = get_rank(mean_reward_adaptive, nodes)
 ranks_static = get_rank(mean_reward_static, nodes)
 
-print("Oracle:")
-print(mean_reward)
-print("Active:")
-print(mean_reward_adaptive)
-print("Random:")
-print(mean_reward_static)
-
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
 ax.plot([1, 15], [1, 15], color="black", zorder=0)
 ax.scatter(ranks_oracle, ranks_adaptive, label="Active inference")
 ax.scatter(ranks_oracle, ranks_static, label="Even sampling", s=4)
-# ax.scatter(
-#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_adaptive[node] for node in mean_reward.keys()], label="Active inference"
-# )
-# ax.scatter(
-#     [mean_reward[node] for node in mean_reward.keys()], [mean_reward_static[node] for node in mean_reward.keys()], label="Even sampling", s=4
-# )
 ax.set_xlabel("Treatment rank\nin the oracle setup")
 ax.set_ylabel("Estimated treatment rank")
 
@@ -385,6 +389,72 @@ fig.legend(
     ncol=2,
 )
 plt.savefig("output/ranks.pdf", bbox_inches="tight")
+
+
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+
+ax.scatter(
+    get_rank(mean_reward, nodes),
+    [mean_reward_adaptive[node] for node in mean_reward.keys()],
+    label="Active inference",
+    s=6,
+)
+ax.errorbar(
+    get_rank(mean_reward, nodes),
+    [mean_reward_adaptive[node] for node in mean_reward.keys()],
+    yerr=(
+        [
+            mean_reward_adaptive[node] - low_reward_adaptive[node]
+            for node in mean_reward.keys()
+        ],
+        [
+            high_reward_adaptive[node] - mean_reward_adaptive[node]
+            for node in mean_reward.keys()
+        ],
+    ),
+    ls="none",
+    capsize=3,
+    capthick=1,
+)
+ax.scatter(
+    get_rank(mean_reward, nodes),
+    [mean_reward_static[node] for node in mean_reward.keys()],
+    label="Even sampling",
+    s=6,
+)
+bars = ax.errorbar(
+    get_rank(mean_reward, nodes),
+    [mean_reward_static[node] for node in mean_reward.keys()],
+    yerr=(
+        [
+            mean_reward_static[node] - low_reward_static[node]
+            for node in mean_reward.keys()
+        ],
+        [
+            high_reward_static[node] - mean_reward_static[node]
+            for node in mean_reward.keys()
+        ],
+    ),
+    ls="none",
+    capsize=3,
+    capthick=0.5,
+    elinewidth=0.5,
+)
+
+ax.set_xticks(
+    [1, 5, 10, 15],
+    ["1st\n(best)", "5th", "10th", "15th\n(worst)"],
+)
+ax.set_xlabel("Treatment rank (oracle)")
+ax.set_ylabel("$E[r_j]$ (estimate)")
+
+fig.legend(
+    frameon=False,
+    bbox_to_anchor=(0.5, 1.05),
+    loc="upper center",
+    ncol=2,
+)
+plt.savefig("output/reward.pdf", bbox_inches="tight")
 
 
 def plot_y_distributions_by_z(df, mean_reward):
@@ -574,7 +644,7 @@ ax.fill_between(
 ax.fill_between(
     np.arange(len(df)),
     np.maximum(df["r"], 0),
-    np.maximum(df["r"], 0)+df["eig"],
+    np.maximum(df["r"], 0) + df["eig"],
     alpha=0.5,
     label="$EIG(\hat{j})$\n(exploration)",
 )

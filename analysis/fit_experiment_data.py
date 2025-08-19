@@ -175,7 +175,8 @@ def main():
     # 1. Load and prepare data
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
-            "output/KnowledgeTrial_adaptive_fast.csv",
+            # "output/KnowledgeTrial_adaptive_fast.csv",
+            "output/KnowledgeTrial_adaptive.csv",
         )
     )
     fit, stan_data = fit_irt_model(

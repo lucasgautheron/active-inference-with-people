@@ -36,7 +36,7 @@ def load_df(source):
 
 
 # Load the data
-adaptive = load_df("output/KnowledgeTrial_adaptive_fast.csv")
+adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
 oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
 static = load_df("output/KnowledgeTrial_static.csv")
 
