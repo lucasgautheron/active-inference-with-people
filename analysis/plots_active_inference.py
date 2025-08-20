@@ -36,6 +36,7 @@ def load_df(source, samples=None):
         if "p" in df.columns
         else None
     )
+    df = df[df["finalized"] == True]
 
     df["z"] = df["z"].astype(int)
     # df["z"] = df["z"].map(lambda s: json.loads(s)["value"])
@@ -167,9 +168,10 @@ def expected_free_energy(df):
 
 # Load the data
 adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
+deployment = load_df("output/KnowledgeTrial_deployment.csv")
 
 
-def plot_predictive_check(df):
+def plot_predictive_check(df, output):
     df = df.head(int(0.5 * len(df)))
     fig, ax = plt.subplots(figsize=(3.2, 2.333))
 
@@ -245,16 +247,18 @@ def plot_predictive_check(df):
     ax.set_xlabel("$p(y=1)$\n(Model posterior prediction)")
     ax.set_ylabel("$y$\n(Actual answer)")
 
-    fig.savefig("output/evaluation_treatment.pdf", bbox_inches="tight")
+    fig.savefig(output, bbox_inches="tight")
 
 
-plot_predictive_check(adaptive)
+plot_predictive_check(adaptive, "output/evaluation_treatment.pdf")
+plot_predictive_check(deployment, "output/evaluation_treatment_deployment.pdf")
 
 oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
 static = load_df("output/KnowledgeTrial_oracle_fast.csv", samples=5)
 
 rewards_oracle = expected_free_energy(oracle)
 rewards_adaptive = expected_free_energy(adaptive)
+rewards_deployment = expected_free_energy(deployment)
 rewards_static = expected_free_energy(static)
 
 mean_reward = {
@@ -327,10 +331,14 @@ def cumulative_frequency(df, output):
 
 
 cumulative_frequency(adaptive, "output/cumulative_node_frequency")
+cumulative_frequency(deployment, "output/cumulative_node_frequency_deployment")
 cumulative_frequency(static, "output/cumulative_node_frequency_random")
 
 mean_reward_adaptive = {
     node: np.mean(rewards_adaptive[node]) for node in rewards_adaptive.keys()
+}
+mean_reward_deployment = {
+    node: np.mean(rewards_deployment[node]) for node in rewards_deployment.keys()
 }
 mean_reward_static = {
     node: np.mean(rewards_static[node]) for node in rewards_static.keys()
@@ -446,7 +454,7 @@ ax.set_xticks(
     ["1st\n(best)", "5th", "10th", "15th\n(worst)"],
 )
 ax.set_xlabel("Treatment rank (oracle)")
-ax.set_ylabel("$E[r_j]$ (estimate)")
+ax.set_ylabel("Estimated treatment utility\n$E[r_j]$")
 
 fig.legend(
     frameon=False,
@@ -457,7 +465,7 @@ fig.legend(
 plt.savefig("output/reward.pdf", bbox_inches="tight")
 
 
-def plot_y_distributions_by_z(df, mean_reward):
+def plot_y_distributions_by_z(df, mean_reward, output):
     """
     Creates a 5x3 grid of plots showing beta distributions fitted to observed y values
     for each z condition (0,1) across all 15 node_ids, ordered by mean reward from highest to lowest.
@@ -513,6 +521,9 @@ def plot_y_distributions_by_z(df, mean_reward):
                     0: False,
                 }
             )
+
+    questions = df_clean.drop_duplicates("node_id").set_index("node_id")
+    questions = questions["definition"].apply(lambda s: json.loads(s)["question"]).to_dict()
 
     # Plot each node
     for i, node_id in enumerate(ordered_nodes):
@@ -578,7 +589,7 @@ def plot_y_distributions_by_z(df, mean_reward):
             f"$E[r_j]={mean_reward[node_id]:.2f}$",
         )
         question = "\n\\scriptsize ".join(
-            textwrap.wrap(questions[node_id - 1], 22)
+            textwrap.wrap(questions[node_id], 22)
         )
         ax.text(
             0.0333,
@@ -617,17 +628,14 @@ def plot_y_distributions_by_z(df, mean_reward):
     plt.tight_layout()
     plt.subplots_adjust(wspace=0.05, hspace=0.25)
 
-    plt.savefig("output/posteriors.pdf", bbox_inches="tight")
-    plt.savefig(
-        "output/posteriors.png",
-        bbox_inches="tight",
-        dpi=300,
-    )
+    plt.savefig(output, bbox_inches="tight")
 
     return fig, axes
 
 
-plot_y_distributions_by_z(adaptive, mean_reward_adaptive)
+plot_y_distributions_by_z(adaptive, mean_reward_adaptive, "output/posteriors.pdf")
+plot_y_distributions_by_z(deployment, mean_reward_deployment, "output/posteriors_deployment.pdf")
+
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 

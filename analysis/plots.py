@@ -37,14 +37,13 @@ def load_df(source):
 
 # Load the data
 adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
+deployment = load_df("output/KnowledgeTrial_deployment.csv")
 oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
 static = load_df("output/KnowledgeTrial_static.csv")
 
-print(adaptive.groupby("participant_id")["node_id"].first().value_counts())
 
-
-def plot_predictive_check(df):
-    df = df.head(int(0.5*len(df)))
+def plot_predictive_check(df, output):
+    df = df.head(int(0.5 * len(df)))
     fig, ax = plt.subplots(figsize=(3.2, 2.333))
 
     ax.scatter(df["p"], df["y"], alpha=0.075, s=5, edgecolors="black", lw=0.2)
@@ -72,14 +71,16 @@ def plot_predictive_check(df):
 
         if n_in_bin > 0:
             n_successes = bin_data["y"].sum()
-            n_failures = (1-bin_data["y"]).sum()
+            n_failures = (1 - bin_data["y"]).sum()
 
             # Calculate observed frequency
-            observed_freq = (1+n_successes)/(2+n_successes+n_failures)
+            observed_freq = (1 + n_successes) / (2 + n_successes + n_failures)
             observed_freqs.append(observed_freq)
 
             if n_in_bin > 0:
-                conf_int = beta_dist.ppf([0.05/2, 1-0.05/2], 1+n_successes, 1+n_failures)
+                conf_int = beta_dist.ppf(
+                    [0.05 / 2, 1 - 0.05 / 2], 1 + n_successes, 1 + n_failures
+                )
                 ci_lowers.append(conf_int[0])
                 ci_uppers.append(conf_int[1])
             else:
@@ -109,7 +110,7 @@ def plot_predictive_check(df):
             capsize=3,
             capthick=1,
             markersize=4,
-            ls="none"
+            ls="none",
         )
 
     ax.plot([0, 1], [0, 1], color="black")
@@ -117,10 +118,11 @@ def plot_predictive_check(df):
     ax.set_xlabel("$q(y=1)$\n(Model posterior prediction)")
     ax.set_ylabel("$y$\n(Actual answer)")
 
-    fig.savefig("output/evaluation_test.pdf", bbox_inches="tight")
+    fig.savefig(output, bbox_inches="tight")
 
 
-plot_predictive_check(adaptive)
+plot_predictive_check(adaptive, "output/evaluation_test.pdf")
+plot_predictive_check(deployment, "output/evaluation_test_deployment.pdf")
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
@@ -149,7 +151,7 @@ scatter = ax.scatter(
 ax.set_xlabel(r"Posterior $\bar{\theta_i}$ (oracle)")
 ax.set_ylabel(r"Posterior $\bar{\theta_i}$ (adaptive)")
 
-print(np.argwhere(np.abs(theta_oracle-theta_adaptive) > 1))
+print(np.argwhere(np.abs(theta_oracle - theta_adaptive) > 1))
 
 r2 = np.corrcoef(theta_oracle, theta_adaptive)[0, 1] ** 2
 ax.text(
@@ -206,69 +208,75 @@ fig.legend(
 plt.savefig("output/node_frequency.pdf", bbox_inches="tight")
 
 
-fig, ax = plt.subplots(figsize=(3.2, 2.13333))
-n = adaptive.groupby("participant_id")["id"].count()
-ax.scatter(n.index, n, label="Adaptive", alpha=0.1)
+def trials_per_participant(df, output):
+    fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+    n = df.groupby("participant_id")["id"].count()
+    ax.scatter(n.index, n, label="Adaptive", alpha=0.1)
 
-# Prepare data for polynomial regression
-X = n.index.values.reshape(-1, 1)
-y = logit(n / (n.max() + 0.1))
+    # Prepare data for polynomial regression
+    X = n.index.values.reshape(-1, 1)
+    y = logit(n / (n.max() + 0.1))
 
-# Create polynomial features (degree 2)
-poly_features = PolynomialFeatures(degree=4, include_bias=True)
-X_poly = poly_features.fit_transform(X)
+    # Create polynomial features (degree 2)
+    poly_features = PolynomialFeatures(degree=4, include_bias=True)
+    X_poly = poly_features.fit_transform(X)
 
-# Fit linear regression with polynomial features
-poly_model = LinearRegression()
-poly_model.fit(X_poly, y)
+    # Fit linear regression with polynomial features
+    poly_model = LinearRegression()
+    poly_model.fit(X_poly, y)
 
-# Generate smooth curve for plotting
-X_smooth = np.linspace(X.min(), X.max(), 100).reshape(-1, 1)
-X_smooth_poly = poly_features.transform(X_smooth)
-predictions = []
-for _ in range(2000):
-    # Resample the data
-    X_boot, y_boot = resample(X_poly, y, random_state=None)
+    # Generate smooth curve for plotting
+    X_smooth = np.linspace(X.min(), X.max(), 100).reshape(-1, 1)
+    X_smooth_poly = poly_features.transform(X_smooth)
+    predictions = []
+    for _ in range(2000):
+        # Resample the data
+        X_boot, y_boot = resample(X_poly, y, random_state=None)
 
-    # Fit model on bootstrap sample
-    model = LinearRegression()
-    model.fit(X_boot, y_boot)
+        # Fit model on bootstrap sample
+        model = LinearRegression()
+        model.fit(X_boot, y_boot)
 
-    # Predict on smooth grid
-    y_pred = model.predict(X_smooth_poly)
-    predictions.append(y_pred)
+        # Predict on smooth grid
+        y_pred = model.predict(X_smooth_poly)
+        predictions.append(y_pred)
 
-predictions = n.max() * expit(np.array(predictions))
+    predictions = n.max() * expit(np.array(predictions))
 
-# Calculate confidence intervals
-mean_pred = np.mean(predictions, axis=0)
-std_pred = np.std(predictions, axis=0)
-ci_lower = np.percentile(predictions, 2.5, axis=0)
-ci_upper = np.percentile(predictions, 97.5, axis=0)
+    # Calculate confidence intervals
+    mean_pred = np.mean(predictions, axis=0)
+    std_pred = np.std(predictions, axis=0)
+    ci_lower = np.percentile(predictions, 2.5, axis=0)
+    ci_upper = np.percentile(predictions, 97.5, axis=0)
 
-# Plot the regression line and uncertainty
-ax.plot(
-    X_smooth.flatten(),
-    mean_pred,
-    linewidth=2,
-    color="#377eb8",
-    label="Polynomial fit",
+    # Plot the regression line and uncertainty
+    ax.plot(
+        X_smooth.flatten(),
+        mean_pred,
+        linewidth=2,
+        color="#377eb8",
+        label="Polynomial fit",
+    )
+    ax.fill_between(
+        X_smooth.flatten(),
+        ci_lower,
+        ci_upper,
+        alpha=0.2,
+        color="#377eb8",
+        label="95% CI",
+    )
+    # Plot the regression line
+    # ax.plot(X_smooth.flatten(), expit(y_pred), linewidth=1.5)
+
+    ax.set_xlabel("Participant \#")
+    ax.set_ylabel("Trials per participant")
+    plt.savefig(output, bbox_inches="tight")
+
+
+trials_per_participant(adaptive, "output/trials_per_participant.pdf")
+trials_per_participant(
+    deployment, "output/trials_per_participant_deployment.pdf"
 )
-ax.fill_between(
-    X_smooth.flatten(),
-    ci_lower,
-    ci_upper,
-    alpha=0.2,
-    color="#377eb8",
-    label="95% CI",
-)
-# Plot the regression line
-# ax.plot(X_smooth.flatten(), expit(y_pred), linewidth=1.5)
-
-ax.set_xlabel("Participant \#")
-ax.set_ylabel("Trials per participant")
-plt.savefig("output/trials_per_participant.pdf", bbox_inches="tight")
-plt.savefig("output/trials_per_participant.png", bbox_inches="tight", dpi=300)
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 n = adaptive.groupby("participant_id")["id"].count()

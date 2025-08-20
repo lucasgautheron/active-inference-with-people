@@ -172,7 +172,19 @@ def main():
     print("Starting IRT Analysis with Stan")
     print("=" * 50)
 
-    # 1. Load and prepare data
+    df, participant_map, item_map, unique_participants, unique_items = (
+        load_and_prepare_data(
+            "output/KnowledgeTrial_deployment.csv",
+        )
+    )
+    fit, stan_data = fit_irt_model(
+        df,
+        chains=4,
+        iter_warmup=1000,
+        iter_sampling=2000,
+    )
+    stan_vars = save_stan_samples(fit, "output/irt_samples_deployment.npz")
+
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
             # "output/KnowledgeTrial_adaptive_fast.csv",
