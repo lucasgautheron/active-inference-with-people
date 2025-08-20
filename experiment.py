@@ -43,7 +43,7 @@ import json
 
 DEBUG_MODE = False
 SETUP = "adaptive"
-RECRUITER = "hotair"
+RECRUITER = "prolific"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
 
 assert SETUP in ["adaptive", "oracle"]
@@ -901,16 +901,15 @@ elif RECRUITER == "cap-recruiter":
 
 class Exp(psynet.experiment.Experiment):
     label = "Active inference for adaptive experiments"
-    initial_recruitment_size = 1
     test_n_bots = 200
     test_mode = "serial"
 
     config = {
         "recruiter": RECRUITER,
         "wage_per_hour": 0,
-        "initial_recruitment_size": 10,
         "auto_recruit": False,
         "show_reward": False,
+        "initial_recruitment_size": 3
     }
 
     if RECRUITER != "hotair":

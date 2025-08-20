@@ -1,7 +1,7 @@
 [Config]
-title = Adaptive trivia questions
+title = Answer general trivia questions (~9 minutes)
 description = This experiment requires you to answer a few trivia questions. Please use a Chrome browser in incognito mode. We keep track of how much money you earn as you progress through the experiment; this means that if the experiment has to end early (e.g. equipment problems) we know how much to pay you. This number will be displayed at the bottom of the screen during the experiment. If you finish the experiment but time out, don't worry, we will approve your experiment manually.
-contact_email_on_error = lucas.gautheron@gmail.com
+contact_email_on_error = computational.audition@gmail.com
 organization_name = University of Missouri and Cornell University
 
 # recruiter = generic
