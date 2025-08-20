@@ -41,7 +41,7 @@ import pandas as pd
 import csv
 import json
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
@@ -871,34 +871,6 @@ class ActiveInference(OptimalDesign):
 
         return best_node, {0: 1 - p_outcome[best_node], 1: p_outcome[best_node]}
 
-
-def get_prolific_settings(experiment_duration):
-    with open("qualification_prolific_en.json", "r") as f:
-        qualification = json.dumps(json.load(f))
-
-    return {
-        "recruiter": "prolific",
-        "base_payment": 12 * DURATION_ESTIMATE / 60 / 60,
-        "prolific_estimated_completion_minutes": DURATION_ESTIMATE / 60,
-        "prolific_recruitment_config": qualification,
-        "auto_recruit": False,
-        "wage_per_hour": 0,
-        "currency": "$",
-        "show_reward": False,
-    }
-
-
-def get_cap_settings(experiment_duration):
-    raise {"wage_per_hour": 12}
-
-
-recruiter_settings = None
-if RECRUITER == "prolific":
-    recruiter_settings = get_prolific_settings(DURATION_ESTIMATE)
-elif RECRUITER == "cap-recruiter":
-    recruiter_settings = get_cap_settings(DURATION_ESTIMATE)
-
-
 class Exp(psynet.experiment.Experiment):
     label = "Active inference for adaptive experiments"
     initial_recruitment_size = 1
@@ -906,15 +878,13 @@ class Exp(psynet.experiment.Experiment):
     test_mode = "serial"
 
     config = {
-        "recruiter": RECRUITER,
+        "recruiter": "hotair",
         "wage_per_hour": 0,
         "initial_recruitment_size": 10,
         "auto_recruit": False,
         "show_reward": False,
     }
 
-    if RECRUITER != "hotair":
-        config.update(**recruiter_settings)
 
     timeline = Timeline(
         MainConsent(),
