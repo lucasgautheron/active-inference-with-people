@@ -17,6 +17,7 @@ from psynet.trial.static import (
 )
 from psynet.consent import MainConsent
 from psynet.demography.general import (
+    Age,
     FormalEducation,
 )
 from psynet.utils import log_time_taken
@@ -677,9 +678,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         start = time.time()
         trials = Trial.query.filter(
             Trial.failed == False,
+            Trial.finalized == True,
             Trial.is_repeat_trial == False,
             Trial.trial_maker_id == self.id,
-            Trial.score != None
+            Trial.score != None,
         ).all()
         logger.info(f"Trials query: {time.time() - start:.3f}s")
 
@@ -916,6 +918,7 @@ class Exp(psynet.experiment.Experiment):
 
     timeline = Timeline(
         MainConsent(),
+        Age(),
         FormalEducation(),
         InfoPage(
             Markup(
