@@ -23,8 +23,6 @@ from psynet.demography.general import (
 from psynet.utils import log_time_taken
 
 from dallinger import db
-from sqlalchemy.orm import selectinload
-import time
 
 import torch
 import pyro
@@ -118,7 +116,6 @@ class AdaptiveTesting(OptimalDesign):
         self.intercept_mean = torch.tensor(0.0)
         self.intercept_sd = torch.tensor(0.0)
 
-        # EIG computation parameters
         self.num_steps = 400
         self.start_lr = 0.1
         self.end_lr = 0.001
@@ -454,14 +451,19 @@ class AdaptiveTesting(OptimalDesign):
                 scale=self.theta_sds[self.participant_index[participant.id]],
             )
 
-            plt.plot(x, y, color="black", label=r"$\theta$(participant)")
+            plt.plot(
+                x,
+                y,
+                color="black",
+                label=r"Participant ability distribution $p(\theta)$",
+            )
 
             eig = eig.detach().numpy()
 
             cmap = plt.get_cmap("tab10")
             for i in range(len(candidates)):
                 item = candidates[i]
-                color = cmap(i % 10)
+                color = cmap(item % 10)
                 y = norm.pdf(
                     x,
                     loc=self.difficulty_means[self.item_index[item]]
@@ -474,8 +476,14 @@ class AdaptiveTesting(OptimalDesign):
                 plt.plot(
                     x,
                     y,
-                    alpha=0.2,
+                    alpha=0.5,
                     color=color,
+                    ls="dotted",
+                    label=(
+                        f"Item difficulty distribution $p(\Delta|d)$"
+                        if i == 0
+                        else None
+                    ),
                 )
                 plt.scatter(
                     [
@@ -486,7 +494,7 @@ class AdaptiveTesting(OptimalDesign):
                     facecolors="none",
                     edgecolors=color,
                     marker="s",
-                    label="EIG" if i == 0 else None,
+                    label="Expected information gain" if i == 0 else None,
                 )
 
                 plt.scatter(
@@ -494,18 +502,22 @@ class AdaptiveTesting(OptimalDesign):
                         self.difficulty_means[self.item_index[item]]
                         - self.intercept_mean,
                     ],
-                    [entropy[i]],
+                    [p_y[i]],
                     color=color,
-                    label="$H(y)$" if i == 0 else None,
+                    label="Probability of success $p(y=1)$" if i == 0 else None,
                 )
 
-            plt.axhline(epsilon, label=r"$\varepsilon$")
+            # plt.axhline(epsilon, label=r"Threshold $\varepsilon$")
             plt.xlim(-3, 3)
             plt.ylim(0, 1)
 
-            plt.legend()
+            plt.legend(loc="upper right")
             plt.savefig(
-                "output/test_{}.png".format(participant.id),
+                "output/test_{}_{}.png".format(
+                    participant.id, 15 - len(candidates)
+                ),
+                bbox_inches="tight",
+                dpi=144
             )
             plt.clf()
 
@@ -640,7 +652,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return nodes
 
     @log_time_taken
-    def prior_data(self, experiment):
+    def prior_data(self):
         data = {"nodes": dict(), "participants": dict()}
 
         # List participants involved in this trial maker
@@ -669,7 +681,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         nodes = self.network_class.query.filter_by(
             trial_maker_id=self.id, full=False, failed=False
         ).all()
-        logger.info(f"Nodes query: {time.time() - start:.3f}s")
 
         # Fetch all trials that belong to this trial maker
         trials = Trial.query.filter(
@@ -710,7 +721,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     def prioritize_nodes(self, nodes, participant, experiment):
         candidates = {node.id: node for node in nodes}
 
-        data = self.prior_data(experiment)
+        data = self.prior_data()
         next_node, p = self.optimizer.get_optimal_node(
             list(candidates.keys()), participant, data
         )
@@ -755,13 +766,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         trial.var.y = (
             trial.answer.lower().strip() in trial.node.definition["answers"]
         )
-
         trial.var.z = (
             int(trial.participant.var.z) if self.use_participant_data else None
         )
         trial.var.p = participant.var.get("p_y", None)
-
-        logger.info(trial.var)
 
         super().finalize_trial(
             answer,
@@ -865,6 +873,7 @@ class ActiveInference(OptimalDesign):
 
         return best_node, {0: 1 - p_outcome[best_node], 1: p_outcome[best_node]}
 
+
 class Exp(psynet.experiment.Experiment):
     label = "Active inference for adaptive experiments"
     initial_recruitment_size = 1
@@ -878,7 +887,6 @@ class Exp(psynet.experiment.Experiment):
         "auto_recruit": False,
         "show_reward": False,
     }
-
 
     timeline = Timeline(
         MainConsent(),
@@ -911,7 +919,7 @@ class Exp(psynet.experiment.Experiment):
                 ),
             )
         ),
-            KnowledgeTrialMaker(
+        KnowledgeTrialMaker(
             id_="optimal_treatment",
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
