@@ -442,7 +442,7 @@ class AdaptiveTesting(OptimalDesign):
             logger.info("Early stopping")
             return None, None
 
-        if False:
+        if DEBUG_MODE:
             from matplotlib import pyplot as plt
 
             entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
@@ -539,7 +539,7 @@ class KnowledgeTrial(StaticTrial):
             **kwargs,
         )
 
-        # Keeps track of whether the participant correctly answered
+        # Keeps track of whether the participant answered correctly
         self.var.y = None
 
         # Relevant participant metadata
@@ -644,7 +644,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         data = {"nodes": dict(), "participants": dict()}
 
         # List participants involved in this trial maker
-        start = time.time()
         participants = (
             db.session.query(Participant)
             .join(Participant._module_states)
@@ -665,17 +664,14 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             }
             for participant in participants
         }
-        logger.info(f"Processing participants: {time.time() - start:.3f}s")
 
         # Fetch all nodes related to this trial maker
-        start = time.time()
         nodes = self.network_class.query.filter_by(
             trial_maker_id=self.id, full=False, failed=False
         ).all()
         logger.info(f"Nodes query: {time.time() - start:.3f}s")
 
         # Fetch all trials that belong to this trial maker
-        start = time.time()
         trials = Trial.query.filter(
             Trial.failed == False,
             Trial.finalized == True,
@@ -683,9 +679,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             Trial.trial_maker_id == self.id,
             Trial.score != None,
         ).all()
-        logger.info(f"Trials query: {time.time() - start:.3f}s")
 
-        start = time.time()
         trials_by_node = {}
         for trial in trials:
             if trial.node_id not in trials_by_node:
@@ -709,7 +703,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     }
                     for trial in trials_by_node[node.id]
                 }
-        logger.info(f"Processing nodes: {time.time() - start:.3f}s")
 
         return data
 
@@ -729,6 +722,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return [candidates[next_node]]
 
+    # overwriting the native prioritize_networks method
     def prioritize_networks(self, networks, participant, experiment):
         if self.optimizer is None:
             return networks
@@ -917,7 +911,7 @@ class Exp(psynet.experiment.Experiment):
                 ),
             )
         ),
-        KnowledgeTrialMaker(
+            KnowledgeTrialMaker(
             id_="optimal_treatment",
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
