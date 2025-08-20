@@ -1,7 +1,0 @@
-#!/bin/bash
-
-set -euo pipefail
-
-export PSYNET_DEVELOPER_MODE=1
-
-./docker/run "$@"
