@@ -517,7 +517,7 @@ class AdaptiveTesting(OptimalDesign):
                     participant.id, 15 - len(candidates)
                 ),
                 bbox_inches="tight",
-                dpi=144
+                dpi=144,
             )
             plt.clf()
 
@@ -582,9 +582,6 @@ class KnowledgeTrial(StaticTrial):
         )
 
         return page
-
-    def score_answer(self, answer, definition):
-        return 1 if answer.lower().strip() in definition["answers"] else 0
 
     def show_feedback(self, experiment, participant):
         return InfoPage(
@@ -688,7 +685,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             Trial.finalized == True,
             Trial.is_repeat_trial == False,
             Trial.trial_maker_id == self.id,
-            Trial.score != None,
         ).all()
 
         trials_by_node = {}
@@ -704,7 +700,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             if node.id in trials_by_node:
                 data["nodes"][node.id] = {
                     trial.id: {
-                        "y": trial.score,
+                        "y": trial.var.y,
                         "z": (
                             data["participants"][trial.participant_id]["z"]
                             if self.use_participant_data
@@ -713,6 +709,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                         "participant_id": trial.participant_id,
                     }
                     for trial in trials_by_node[node.id]
+                    if trial.var.get("y", None) is not None
                 }
 
         return data
