@@ -32,6 +32,10 @@ def load_df(source):
         if "p" in df.columns
         else None
     )
+    if "deployment" in source:
+        participants = pd.read_csv("output/Participant.csv")
+        participants = participants[participants["progress"] == 1]
+        df = df[df["participant_id"].isin(participants["id"])]
     return df
 
 
@@ -206,7 +210,6 @@ fig.legend(
     frameon=False,
 )
 plt.savefig("output/node_frequency.pdf", bbox_inches="tight")
-
 
 def trials_per_participant(df, output):
     fig, ax = plt.subplots(figsize=(3.2, 2.13333))

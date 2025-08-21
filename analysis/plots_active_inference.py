@@ -38,6 +38,11 @@ def load_df(source, samples=None):
     )
     df = df[df["finalized"] == True]
 
+    if "deployment" in source:
+        participants = pd.read_csv("output/Participant.csv")
+        participants = participants[participants["progress"] == 1]
+        df = df[df["participant_id"].isin(participants["id"])]
+
     df["z"] = df["z"].astype(int)
     # df["z"] = df["z"].map(lambda s: json.loads(s)["value"])
 
@@ -338,7 +343,8 @@ mean_reward_adaptive = {
     node: np.mean(rewards_adaptive[node]) for node in rewards_adaptive.keys()
 }
 mean_reward_deployment = {
-    node: np.mean(rewards_deployment[node]) for node in rewards_deployment.keys()
+    node: np.mean(rewards_deployment[node])
+    for node in rewards_deployment.keys()
 }
 mean_reward_static = {
     node: np.mean(rewards_static[node]) for node in rewards_static.keys()
@@ -523,7 +529,11 @@ def plot_y_distributions_by_z(df, mean_reward, output):
             )
 
     questions = df_clean.drop_duplicates("node_id").set_index("node_id")
-    questions = questions["definition"].apply(lambda s: json.loads(s)["question"]).to_dict()
+    questions = (
+        questions["definition"]
+        .apply(lambda s: json.loads(s)["question"])
+        .to_dict()
+    )
 
     # Plot each node
     for i, node_id in enumerate(ordered_nodes):
@@ -588,9 +598,7 @@ def plot_y_distributions_by_z(df, mean_reward, output):
         ax.set_title(
             f"$E[r_j]={mean_reward[node_id]:.2f}$",
         )
-        question = "\n\\scriptsize ".join(
-            textwrap.wrap(questions[node_id], 22)
-        )
+        question = "\n\\scriptsize ".join(textwrap.wrap(questions[node_id], 22))
         ax.text(
             0.0333,
             0.975,
@@ -633,8 +641,12 @@ def plot_y_distributions_by_z(df, mean_reward, output):
     return fig, axes
 
 
-plot_y_distributions_by_z(adaptive, mean_reward_adaptive, "output/posteriors.pdf")
-plot_y_distributions_by_z(deployment, mean_reward_deployment, "output/posteriors_deployment.pdf")
+plot_y_distributions_by_z(
+    adaptive, mean_reward_adaptive, "output/posteriors.pdf"
+)
+plot_y_distributions_by_z(
+    deployment, mean_reward_deployment, "output/posteriors_deployment.pdf"
+)
 
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
