@@ -156,6 +156,7 @@ def expected_free_energy(df):
         EIG = np.mean(np.log(p_y_given_phi / p_y))
 
         p_z = z.mean()
+
         gamma = 0.1
         U = gamma * (
             p_z * phi[1]
@@ -283,62 +284,6 @@ order = sorted(
 )
 
 
-fig, ax = plt.subplots(figsize=(3.2, 2.13333))
-
-nodes = list(mean_reward.keys())
-
-
-def cumulative_frequency(df, output):
-    cmap = plt.get_cmap("Blues")
-
-    unique_nodes = sorted(df["node_id"].unique())
-
-    # Initialize counters
-    counts = {node: 0 for node in unique_nodes}
-    cumulative_data = {node: [] for node in unique_nodes}
-
-    # Calculate cumulative counts for each row
-    for _, row in df.iterrows():
-        counts[row["node_id"]] += 1
-
-        # Record current count for all nodes
-        for node in unique_nodes:
-            cumulative_data[node].append(counts[node])
-
-    # Plot
-    fig, ax = plt.subplots(figsize=(3.2, 2.13333))
-
-    # Create a ScalarMappable for the colorbar
-    norm = plt.Normalize(
-        vmin=np.min(list(mean_reward.values())),
-        vmax=np.max(list(mean_reward.values())),
-    )
-    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
-    sm.set_array([])  # Required for ScalarMappable
-
-    for node in unique_nodes:
-        color = cmap(norm(mean_reward[node]))
-        ax.plot(cumulative_data[node], color=color)
-
-    ax.set_xlabel("Step $t$")
-    ax.set_ylabel("Cumulative frequency\nof treatment $j$\nat step $t$")
-    cbar = plt.colorbar(sm, ax=ax)  # Use the ScalarMappable here
-    cbar.set_label(
-        r"$E[r_j]_{oracle}$",
-        rotation=90,
-        labelpad=15,
-    )
-    fig.savefig(
-        f"{output}.pdf",
-        bbox_inches="tight",
-    )
-    fig.savefig(f"{output}.png", bbox_inches="tight", dpi=300)
-
-
-cumulative_frequency(adaptive, "output/cumulative_node_frequency")
-cumulative_frequency(deployment, "output/cumulative_node_frequency_deployment")
-cumulative_frequency(static, "output/cumulative_node_frequency_random")
-
 mean_reward_adaptive = {
     node: np.mean(rewards_adaptive[node]) for node in rewards_adaptive.keys()
 }
@@ -366,6 +311,71 @@ high_reward_static = {
     node: np.quantile(rewards_static[node], q=1 - 0.05 / 2)
     for node in rewards_static.keys()
 }
+
+
+fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+
+nodes = list(mean_reward.keys())
+
+
+def cumulative_frequency(df, mean_reward, output):
+    cmap = plt.get_cmap("RdBu")
+
+    unique_nodes = sorted(df["node_id"].unique())
+
+    # Initialize counters
+    counts = {node: 0 for node in unique_nodes}
+    cumulative_data = {node: [] for node in unique_nodes}
+
+    # Calculate cumulative counts for each row
+    for _, row in df.iterrows():
+        counts[row["node_id"]] += 1
+
+        # Record current count for all nodes
+        for node in unique_nodes:
+            cumulative_data[node].append(counts[node])
+
+    # Plot
+    fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+
+    # Create a ScalarMappable for the colorbar
+    amplitude = np.max(np.abs(list(mean_reward.values())))
+    norm = plt.Normalize(
+        vmin=-amplitude,
+        vmax=+amplitude,
+    )
+    sm = cm.ScalarMappable(norm=norm, cmap=cmap)
+    sm.set_array([])  # Required for ScalarMappable
+
+    for node in unique_nodes:
+        color = cmap(norm(mean_reward[node]))
+        ax.plot(cumulative_data[node], color=color)
+
+    ax.set_xlabel("Step $t$")
+    ax.set_ylabel("Cumulative frequency\nof treatment $j$\nat step $t$")
+    cbar = plt.colorbar(sm, ax=ax)  # Use the ScalarMappable here
+    cbar.set_label(
+        r"$E[r_j]_{oracle}$",
+        rotation=90,
+        labelpad=15,
+    )
+    fig.savefig(
+        f"{output}.pdf",
+        bbox_inches="tight",
+    )
+    fig.savefig(f"{output}.png", bbox_inches="tight", dpi=300)
+
+
+cumulative_frequency(adaptive, mean_reward, "output/cumulative_node_frequency")
+cumulative_frequency(
+    deployment,
+    mean_reward_deployment,
+    "output/cumulative_node_frequency_deployment",
+)
+cumulative_frequency(
+    static, mean_reward, "output/cumulative_node_frequency_random"
+)
+
 
 nodes = rewards_oracle.keys()
 

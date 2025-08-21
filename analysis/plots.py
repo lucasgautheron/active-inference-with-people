@@ -36,6 +36,7 @@ def load_df(source):
         participants = pd.read_csv("output/Participant.csv")
         participants = participants[participants["progress"] == 1]
         df = df[df["participant_id"].isin(participants["id"])]
+
     return df
 
 
