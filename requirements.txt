@@ -1,5 +1,6 @@
 #psynet@git+https://gitlab.com/PsyNetDev/PsyNet@master#egg=psynet
-psynet==12.1.0
+psynet==12.1.1
+dallinger==11.3.1  # recommended version for psynet 12.1.1
 pyro-ppl==1.9.1
 matplotlib
 pandas
