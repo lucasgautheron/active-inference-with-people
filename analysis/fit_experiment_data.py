@@ -14,6 +14,11 @@ def load_and_prepare_data(csv_file, samples=None):
     df = pd.read_csv(csv_file)
     df = df[df["trial_maker_id"] == "optimal_test"]
 
+    if "deployment" in csv_file:
+        participants = pd.read_csv("output/Participant.csv")
+        participants = participants[participants["progress"] == 1]
+        df = df[df["participant_id"].isin(participants["id"])]
+
     if samples is not None:
         df = df.sample(samples)
 
