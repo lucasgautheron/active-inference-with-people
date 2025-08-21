@@ -22,7 +22,7 @@ outcomes.
 
 This repository implements two experiments, each of which is based on trivia questions from Dubourg et al., 2025.
 
-## Experiment 1 (branch: main)
+## Experiment 1
 
 In the first experiment, we apply active inference to infer participants' ability in a target domain by administering as
 few tests as possible.
@@ -34,7 +34,7 @@ We achieve a 33% reduction in the tests administered with negligible information
 |:------------------------------------------------:|:--------------------------------------------------------:|
 |      ![](output/trials_per_participant.png)      |  ![](output/theta_comparison.png)                       |
 
-## Experiment 2 (branch: active-inference)
+## Experiment 2 
 
 The second experiment illustrates the adaptive search for optimal treatments.
 In our case, we seek the trivia questions that are most associated with the education-level of the participants.
