@@ -1,5 +1,15 @@
 # Active inference for real-time adaptive testing with PsyNet
 
+<!-- TOC -->
+* [Experiment 1](#experiment-1-branch-main)
+* [Experiment 2](#experiment-2-branch-active-inference)
+* [Running this experiment](#running-this-experiment)
+  * [GitHub Codespaces](#github-codespaces)
+  * [Locally in a virtual environment](#locally-in-a-virtual-environment)
+  * [Other options](#other-options)
+* [References](#references)
+<!-- TOC -->
+
 This experiment implements real-time adaptive testing using active inference in PsyNet.
 
 Active inference is a joint-theory of action and perception in biological systems with applications in machine learning.
