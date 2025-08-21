@@ -24,7 +24,7 @@ import numpy as np
 import seaborn as sns
 
 
-def load_df(source):
+def load_df(source, samples=None):
     df = pd.read_csv(source)
     df = df[df["trial_maker_id"] == "optimal_test"]
     df["p"] = (
@@ -37,6 +37,9 @@ def load_df(source):
         participants = participants[participants["progress"] == 1]
         df = df[df["participant_id"].isin(participants["id"])]
 
+    if samples is not None:
+        df = df.sample(n=samples)
+
     return df
 
 
@@ -44,7 +47,7 @@ def load_df(source):
 adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
 deployment = load_df("output/KnowledgeTrial_deployment.csv")
 oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
-static = load_df("output/KnowledgeTrial_static.csv")
+static = load_df("output/KnowledgeTrial_oracle_fast.csv", len(adaptive))
 
 
 def plot_predictive_check(df, output):
@@ -211,6 +214,7 @@ fig.legend(
     frameon=False,
 )
 plt.savefig("output/node_frequency.pdf", bbox_inches="tight")
+
 
 def trials_per_participant(df, output):
     fig, ax = plt.subplots(figsize=(3.2, 2.13333))
