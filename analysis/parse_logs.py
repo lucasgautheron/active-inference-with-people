@@ -11,6 +11,17 @@ import re
 import pandas as pd
 import numpy as np
 from matplotlib import pyplot as plt
+import matplotlib
+
+matplotlib.use("pgf")
+plt.rcParams.update(
+    {
+        "pgf.texsystem": "pdflatex",
+        "text.usetex": True,
+        "font.family": "serif",
+    },
+)
+matplotlib.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
 
 
 def parse_log_file(file_path):
@@ -104,22 +115,41 @@ def parse_log_file(file_path):
 def plot_performance(df, task):
     fig, ax = plt.subplots(figsize=(3.2, 2.13333))
     optimal_test = df[df["task_nature"] == f"optimal_{task}"]
-    x = np.arange(len(optimal_test))
+    optimal_test.reset_index(inplace=True)
+    optimal_test["no"] = optimal_test.index
+    optimal_test.dropna(inplace=True)
+    x = optimal_test["no"]
     ax.fill_between(
-        x, np.zeros(len(x)), optimal_test["prior_data_time"], label="I/O"
+        x,
+        np.zeros(len(x)),
+        optimal_test["prior_data_time"],
+        alpha=0.5,
+        label="I/O",
     )
     ax.fill_between(
         x,
         optimal_test["prior_data_time"],
         optimal_test["prioritize_nodes_time"],
+        alpha=0.5,
         label="Computations",
+    )
+
+    low = np.quantile(optimal_test["prioritize_nodes_time"], q=0.05 / 2)
+    high = np.quantile(optimal_test["prioritize_nodes_time"], q=1 - 0.05 / 2)
+    ax.text(
+        0.05,
+        0.95,
+        f"$\\tau \in [{low:.1f} s,{high:.1f} s]_{{95\\%}}$",
+        ha="left",
+        va="top",
+        transform=ax.transAxes,
     )
 
     ax.set_xlabel("Trial number")
     ax.set_ylabel("Time in seconds")
     ax.set_ylim(0, 2.5)
 
-    fig.legend(ncol=2, frameon=False)
+    fig.legend(ncol=2, loc="upper center", frameon=False)
     fig.savefig(f"output/performance_{task}.pdf", bbox_inches="tight")
 
 
