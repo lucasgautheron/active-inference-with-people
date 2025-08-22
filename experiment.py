@@ -23,6 +23,7 @@ from psynet.demography.general import (
 from psynet.utils import log_time_taken
 
 from dallinger import db
+from sqlalchemy import Column, Integer
 
 import torch
 import pyro
@@ -37,7 +38,6 @@ from scipy.stats import norm, beta as beta_dist
 
 import pandas as pd
 import csv
-import json
 
 DEBUG_MODE = True
 SETUP = "adaptive"
@@ -527,7 +527,11 @@ class AdaptiveTesting(OptimalDesign):
         }
 
 
+class CustomTrial(GibbsTrial):
+    random_integer = Column(Integer)
+
 class KnowledgeTrial(StaticTrial):
+
     time_estimate = (
         25  # how long it should take to complete each trial, in seconds
     )
@@ -727,6 +731,8 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # retrieve all relevant prior data
         data = self.prior_data()
+
+        assert set(node_network.keys()) <= set(data["nodes"].keys())
 
         # retrieve optimal node
         next_node, p = self.optimizer.get_optimal_node(
