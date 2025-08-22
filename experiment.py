@@ -714,44 +714,33 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         return data
 
+    # overload the default prioritize_networks method
     @log_time_taken
-    def prioritize_nodes(self, nodes, participant, experiment):
-        candidates = {node.id: node for node in nodes}
-
-        data = self.prior_data()
-        next_node, p = self.optimizer.get_optimal_node(
-            list(candidates.keys()), participant, data
-        )
-
-        participant.var.set("p_y", p)
-
-        if next_node is None:
-            return []
-
-        return [candidates[next_node]]
-
-    # overwriting the native prioritize_networks method
     def prioritize_networks(self, networks, participant, experiment):
         if self.optimizer is None:
             return networks
 
-        nodes = [network.head for network in networks]
-        nodes = self.prioritize_nodes(nodes, participant, experiment)
+        node_network = {
+            network.head.id: i for i, network in enumerate(networks)
+        }
 
-        # filter
-        networks = [
-            network
-            for network in networks
-            if network.head.id in [node.id for node in nodes]
-        ]
 
-        # re-order
-        order = [node.id for node in nodes]
-        networks = sorted(
-            networks, key=lambda network: order.index(network.head.id)
+        # retrieve all relevant prior data
+        data = self.prior_data()
+
+        # retrieve optimal node
+        next_node, p = self.optimizer.get_optimal_node(
+            list(node_network.keys()), participant, data
         )
 
-        return networks
+        # store the optimizer estimate of p(y)
+        participant.var.set("p_y", p)
+
+        # early-stopping
+        if next_node is None:
+            return []
+
+        return [networks[node_network[next_node]]]
 
     def finalize_trial(
         self,
@@ -921,7 +910,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domain=0 if DEBUG_MODE else 1,  # questions about american history
+            domain=1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5 if SETUP == "adaptive" else 15,
             max_trials_per_participant=5 if SETUP == "adaptive" else 15,
