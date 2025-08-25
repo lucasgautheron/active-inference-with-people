@@ -3,6 +3,10 @@
     "features": {
         "ghcr.io/devcontainers/features/docker-in-docker:2": {}
     },
+    // This initializeCommand is not great for caching, but it seems necessary to avoid
+    // out-of-memory errors in the build process. Hopefully we can fix this in due 
+    // course by optimizing the base image.
+    "initializeCommand": "docker system prune --all --force",
     "postCreateCommand": "bash .devcontainer/postcreate.sh",
     "postAttachCommand": "bash .devcontainer/postattach.sh",
     "customizations": {
