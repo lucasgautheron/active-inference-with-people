@@ -1,6 +1,11 @@
-#psynet@git+https://gitlab.com/PsyNetDev/PsyNet@master#egg=psynet
-psynet==12.1.1
-dallinger==11.3.1  # recommended version for psynet 12.1.1
+# This commit is from the ISMIR 2025 branch (https://gitlab.com/PsyNetDev/PsyNet/-/merge_requests/856)
+# We should be able to update this to a proper release in due course, probably sometime late September
+psynet@git+https://gitlab.com/PsyNetDev/PsyNet@dc28db2f1a4d9b111fc52c4f10c90474cfa12657#egg=psynet
+
+# Tagged releases would look like this:
+# psynet==12.1.1
+# dallinger==11.3.1  # recommended version for psynet 12.1.1
+
 pyro-ppl==1.9.1
 matplotlib
 pandas
