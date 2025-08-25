@@ -4,5 +4,12 @@
         "ghcr.io/devcontainers/features/docker-in-docker:2": {}
     },
     "postCreateCommand": "bash .devcontainer/postcreate.sh",
-    "postAttachCommand": "bash .devcontainer/postattach.sh"
+    "postAttachCommand": "bash .devcontainer/postattach.sh",
+    "customizations": {
+        "vscode": {
+            "extensions": [
+                "ms-python.python"
+            ]
+        }
+    }
 }
