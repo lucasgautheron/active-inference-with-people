@@ -65,6 +65,14 @@ For this to work, you must first verify that:
 If the above requirements are satisfied, you can launch the experiment in Codespaces as follows.
 On the repository page, click the green "Code" button, click "Codespaces",
 and then click "Create codespace on main".
+
+It's not compulsory, but we recommend 'installing' this environment as a local app
+(technically, a 'Progressive Web Application').
+To do this in Chrome, go to your URL bar, and look on the right for an icon of a computer
+with an arrow, which says 'Install' when you mouseover it. Click this, and your repository
+should open in its own app. This provides a better UI experience, including better handling
+of keyboard shortcuts.
+
 The codespace will take a while to start up, because it needs to install the dependencies,
 but don't worry, this is a one-time process.
 Once the codespace is ready, you can then launch the experiment in debug mode by running the
