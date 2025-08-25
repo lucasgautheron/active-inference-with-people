@@ -75,6 +75,12 @@ of keyboard shortcuts.
 
 The codespace will take a while to start up, because it needs to install the dependencies,
 but don't worry, this is a one-time process.
+
+Note: if you encounter an error at this point, look at the container build logs.
+If you see an out-of-memory occur in the Docker build process, we recommend calling
+`Codespaces: Rebuild container`, then selecting `Full rebuild` so that the cache is cleared
+and free memory is maximized.
+
 Once the codespace is ready, you can then launch the experiment in debug mode by running the
 following terminal command:
 
