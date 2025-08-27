@@ -23,7 +23,6 @@ from psynet.demography.general import (
 from psynet.utils import log_time_taken
 
 from dallinger import db
-from sqlalchemy.orm import selectinload
 import time
 
 import torch
