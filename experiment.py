@@ -41,7 +41,7 @@ import csv
 import json
 
 DEBUG_MODE = False
-SETUP = "adaptive"
+SETUP = "oracle"
 RECRUITER = "prolific"
 DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
 
@@ -587,7 +587,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
     def __init__(
         self,
         optimizer_class,
-        domain,
+        domains,
         use_participant_data,
         *args,
         **kwargs,
@@ -596,7 +596,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         Initialize the trial maker
         with the list of all possibles challenges
         """
-        nodes = self.load_nodes(domain)
+        nodes = self.load_nodes(domains)
 
         super().__init__(
             *args,
@@ -617,10 +617,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
         self.use_participant_data = use_participant_data
 
-    def load_nodes(self, domain):
+    def load_nodes(self, domains: list):
         questions = pd.read_csv("static/questions.csv")
         questions["domain"] = questions["id"] // 15
-        questions = questions[questions["domain"] == domain]
+        questions = questions[questions["domain"].isin(domains)]
         logger.info(questions)
 
         nodes = [
@@ -950,7 +950,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domain=0 if DEBUG_MODE else 1,  # questions about american history
+            domains=[0] if DEBUG_MODE else [0,1],  # questions about the solar system and american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5 if SETUP == "adaptive" else 15,
             max_trials_per_participant=5 if SETUP == "adaptive" else 15,
@@ -960,7 +960,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 AdaptiveTesting if SETUP == "adaptive" else None
             ),  # Bayesian adaptive design w/ an item-response model
-            domain=0,  # questions about the solar system
+            domains=[0],  # questions about the solar system
             use_participant_data=False,  # optimization does not require participant metadata
             expected_trials_per_participant=15,
             max_trials_per_participant=15,
