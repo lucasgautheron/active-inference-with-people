@@ -955,15 +955,15 @@ class Exp(psynet.experiment.Experiment):
             expected_trials_per_participant=5 if SETUP == "adaptive" else 15,
             max_trials_per_participant=5 if SETUP == "adaptive" else 15,
         ),
-        KnowledgeTrialMaker(
-            id_="optimal_test",
-            optimizer_class=(
-                AdaptiveTesting if SETUP == "adaptive" else None
-            ),  # Bayesian adaptive design w/ an item-response model
-            domains=[0],  # questions about the solar system
-            use_participant_data=False,  # optimization does not require participant metadata
-            expected_trials_per_participant=15,
-            max_trials_per_participant=15,
-        ),
+        # KnowledgeTrialMaker(
+        #     id_="optimal_test",
+        #     optimizer_class=(
+        #         AdaptiveTesting if SETUP == "adaptive" else None
+        #     ),  # Bayesian adaptive design w/ an item-response model
+        #     domains=[0],  # questions about the solar system
+        #     use_participant_data=False,  # optimization does not require participant metadata
+        #     expected_trials_per_participant=15,
+        #     max_trials_per_participant=15,
+        # ),
         SuccessfulEndPage(),
     )
