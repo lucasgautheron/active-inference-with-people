@@ -23,7 +23,6 @@ from psynet.demography.general import (
 from psynet.utils import log_time_taken
 
 from dallinger import db
-from sqlalchemy import Column, Integer
 
 import torch
 import pyro
@@ -525,10 +524,6 @@ class AdaptiveTesting(OptimalDesign):
             0: 1 - p_outcome[optimal_test],
             1: p_outcome[optimal_test],
         }
-
-
-class CustomTrial(GibbsTrial):
-    random_integer = Column(Integer)
 
 class KnowledgeTrial(StaticTrial):
 
