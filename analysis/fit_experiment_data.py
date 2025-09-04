@@ -5,18 +5,25 @@ import json
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
+from os.path import exists
 
 
 # Load and prepare the data
-def load_and_prepare_data(csv_file, samples=None):
+def load_and_prepare_data(csv_file, trial_maker_id, samples=None):
     """Load the knowledge trial data and prepare it for IRT modeling"""
 
     df = pd.read_csv(csv_file)
-    df = df[df["trial_maker_id"] == "optimal_test"]
+    df = df[df["trial_maker_id"] == trial_maker_id]
+    df = df[df["item_id"] < 15]
 
-    if "deployment" in csv_file:
-        participants = pd.read_csv("output/Participant.csv")
+    participant_data = csv_file.replace("KnowledgeTrial", "Participant")
+    if exists(participant_data):
+        participants = pd.read_csv(participant_data)
         participants = participants[participants["progress"] == 1]
+
+        if len(participants) > 200:
+            participants = participants.head(200)
+
         df = df[df["participant_id"].isin(participants["id"])]
 
     if samples is not None:
@@ -179,7 +186,7 @@ def main():
 
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
-            "output/KnowledgeTrial_deployment.csv",
+            "output/KnowledgeTrial_deployment.csv", "optimal_test"
         )
     )
     fit, stan_data = fit_irt_model(
@@ -194,6 +201,7 @@ def main():
         load_and_prepare_data(
             # "output/KnowledgeTrial_adaptive_fast.csv",
             "output/KnowledgeTrial_adaptive.csv",
+            "optimal_test",
         )
     )
     fit, stan_data = fit_irt_model(
@@ -207,7 +215,7 @@ def main():
 
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
-            "output/KnowledgeTrial_oracle_fast.csv",
+            "output/KnowledgeTrial_oracle_fast.csv", "optimal_test"
         )
     )
     fit, stan_data = fit_irt_model(
@@ -221,7 +229,8 @@ def main():
     df, participant_map, item_map, unique_participants, unique_items = (
         load_and_prepare_data(
             "output/KnowledgeTrial_oracle_fast.csv",
-            samples=n_adaptive_responses
+            "optimal_test",
+            samples=n_adaptive_responses,
         )
     )
     fit, stan_data = fit_irt_model(
@@ -231,6 +240,7 @@ def main():
         iter_sampling=2000,
     )
     stan_vars = save_stan_samples(fit, "output/irt_samples_static.npz")
+
 
 # Run the analysis
 if __name__ == "__main__":

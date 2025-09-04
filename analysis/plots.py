@@ -33,7 +33,7 @@ def load_df(source, samples=None):
         else None
     )
     if "deployment" in source:
-        participants = pd.read_csv("output/Participant.csv")
+        participants = pd.read_csv("output/Participant_deployment.csv")
         participants = participants[participants["progress"] == 1]
         df = df[df["participant_id"].isin(participants["id"])]
 

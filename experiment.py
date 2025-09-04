@@ -40,9 +40,9 @@ import pandas as pd
 import csv
 import json
 
-DEBUG_MODE = False
-SETUP = "oracle"
-RECRUITER = "prolific"
+DEBUG_MODE = True
+SETUP = "adaptive"
+RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 30 * 20  # in seconds
 
 assert SETUP in ["adaptive", "oracle"]
@@ -57,41 +57,53 @@ logger = logging.getLogger()
 class Oracle:
     """
     Oracle for simulating the experiment
-    using real human data from Dubourg et al., 2025
+    using real human data
     """
 
-    def __init__(self, domain):
-        answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[domain * 15 :, : (domain + 1) * 15]
-        mask = ~np.any(pd.isna(answers), axis=1)
-        answers = answers[mask]
+    def __init__(self, domains):
+        answers = pd.read_csv("output/KnowledgeTrial_oracle_treatment.csv")
+        answers["domain"] = (answers["node_id"] - 1) // 15
+        answers = answers[answers["domain"].isin(domains)]
 
-        self.answers = [
-            {
-                "answers": answers[i],
-            }
-            for i in range(len(answers))
-        ]
+        logger.info(answers["answer"])
 
-        self.education = pd.read_csv("static/education.csv")["college"].values[
-            mask
-        ]
+        participants = pd.read_csv("output/Participant_oracle_treatment.csv")
+        participants = participants[participants["progress"] == 1]
+        participants.reset_index(inplace=True)
+        participants["new_participant_id"] = participants.index.values + 1
+
+        logger.info(participants[participants["new_participant_id"] == 103])
+
+        answers = answers.merge(
+            participants[["id", "new_participant_id"]],
+            how="inner",
+            left_on="participant_id",
+            right_on="id",
+        )
+
+        logger.info(answers[answers["new_participant_id"] == 103])
+
+        answers["answer"].fillna("", inplace=True)
+        self.answers = {
+            (answer["new_participant_id"], answer["question"]): answer["answer"]
+            for answer in answers.to_dict(orient="records")
+        }
+        self.education = {
+            participant["new_participant_id"]: participant["z"]
+            for participant in participants.to_dict(orient="records")
+        }
 
         logger.info("Oracle data:")
         logger.info(answers.shape)
 
-    def answer(self, participant_id: int, item: int):
-        return (
-            self.answers[participant_id]["answers"][item]
-            if item in self.answers[participant_id]
-            else ""
-        )
+    def answer(self, participant_id: int, item_id: int):
+        return self.answers[(participant_id, item_id)]
 
     def college(self, participant_id: int):
         return self.education[participant_id]
 
 
-oracle = Oracle(domain=0)
+oracle = Oracle(domains=[0, 1])
 
 
 class OptimalDesign:
@@ -445,7 +457,7 @@ class AdaptiveTesting(OptimalDesign):
             logger.info("Early stopping")
             return None, None
 
-        if False:
+        if DEBUG_MODE == True:
             from matplotlib import pyplot as plt
 
             entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
@@ -566,7 +578,7 @@ class KnowledgeTrial(StaticTrial):
                 block_copy_paste=True,
                 bot_response=lambda: oracle.answer(
                     participant.id,
-                    self.definition["item_id"],
+                    question,
                 ),
             ),
             time_estimate=self.time_estimate,
@@ -843,6 +855,7 @@ class ActiveInference(OptimalDesign):
             EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
 
             gamma = 0.1
+            p_z = 0.5
             U = gamma * np.mean(
                 p_z * y[1]
                 + (1 - p_z) * (1 - y[0])
@@ -955,7 +968,7 @@ class Exp(psynet.experiment.Experiment):
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
             domains=(
-                [0] if DEBUG_MODE else [0, 1]
+                [1] if DEBUG_MODE else [0, 1]
             ),  # questions about the solar system and american history
             use_participant_data=True,  # optimization requires participant metadata
             expected_trials_per_participant=5 if SETUP == "adaptive" else 30,
