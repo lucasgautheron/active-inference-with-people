@@ -43,7 +43,7 @@ import json
 DEBUG_MODE = False
 SETUP = "oracle"
 RECRUITER = "prolific"
-DURATION_ESTIMATE = 60 + 15 * 20 + 5 * 20  # in seconds
+DURATION_ESTIMATE = 60 + 30 * 20  # in seconds
 
 assert SETUP in ["adaptive", "oracle"]
 assert RECRUITER in ["hotair", "prolific", "cap-recruiter"]
@@ -81,7 +81,11 @@ class Oracle:
         logger.info(answers.shape)
 
     def answer(self, participant_id: int, item: int):
-        return self.answers[participant_id]["answers"][item]
+        return (
+            self.answers[participant_id]["answers"][item]
+            if item in self.answers[participant_id]
+            else ""
+        )
 
     def college(self, participant_id: int):
         return self.education[participant_id]
@@ -877,7 +881,7 @@ def get_prolific_settings(experiment_duration):
 
     return {
         "recruiter": "prolific",
-        "base_payment": 12 * DURATION_ESTIMATE / 60 / 60,
+        "base_payment": 9 * DURATION_ESTIMATE / 60 / 60,
         "prolific_estimated_completion_minutes": DURATION_ESTIMATE / 60,
         "prolific_recruitment_config": qualification,
         "auto_recruit": False,
@@ -908,7 +912,7 @@ class Exp(psynet.experiment.Experiment):
         "wage_per_hour": 0,
         "auto_recruit": False,
         "show_reward": False,
-        "initial_recruitment_size": 3
+        "initial_recruitment_size": 3,
     }
 
     if RECRUITER != "hotair":
@@ -950,10 +954,12 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 ActiveInference if SETUP == "adaptive" else None
             ),  # Active inference w/ a prior preference over outcomes
-            domains=[0] if DEBUG_MODE else [0,1],  # questions about the solar system and american history
+            domains=(
+                [0] if DEBUG_MODE else [0, 1]
+            ),  # questions about the solar system and american history
             use_participant_data=True,  # optimization requires participant metadata
-            expected_trials_per_participant=5 if SETUP == "adaptive" else 15,
-            max_trials_per_participant=5 if SETUP == "adaptive" else 15,
+            expected_trials_per_participant=5 if SETUP == "adaptive" else 30,
+            max_trials_per_participant=5 if SETUP == "adaptive" else 30,
         ),
         # KnowledgeTrialMaker(
         #     id_="optimal_test",
