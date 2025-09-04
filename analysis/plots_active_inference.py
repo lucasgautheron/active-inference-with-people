@@ -28,7 +28,7 @@ from sklearn.preprocessing import PolynomialFeatures
 from sklearn.utils import resample
 
 
-def load_df(source, samples=None):
+def load_df(source, shift_node_id=False, samples=None):
     df = pd.read_csv(source)
     df = df[df["trial_maker_id"] == "optimal_treatment"]
     df["p"] = (
@@ -39,9 +39,13 @@ def load_df(source, samples=None):
     df = df[df["finalized"] == True]
 
     if "deployment" in source:
-        participants = pd.read_csv("output/Participant.csv")
+        participants = pd.read_csv("output/Participant_deployment.csv")
         participants = participants[participants["progress"] == 1]
         df = df[df["participant_id"].isin(participants["id"])]
+
+    if shift_node_id:
+        df["node_id"] = df["node_id"] - 15
+        df = df[df["node_id"] >= 1]
 
     df["z"] = df["z"].astype(int)
     # df["z"] = df["z"].map(lambda s: json.loads(s)["value"])
@@ -107,7 +111,7 @@ def expected_free_energy(df):
     Phi = np.random.beta(alpha, beta, n_samples)
     z = np.random.binomial(np.ones(n_samples, dtype=int), Phi)
 
-    nodes_ids = np.arange(15) + 1
+    nodes_ids = sorted(df["node_id"].unique())
 
     rewards = dict()
     eig = dict()
@@ -157,7 +161,8 @@ def expected_free_energy(df):
 
         p_z = z.mean()
 
-        gamma = 0.1
+        gamma = 0.2
+        p_z = 0.5
         U = gamma * (
             p_z * phi[1]
             + (1 - p_z) * (1 - phi[0])
@@ -173,7 +178,7 @@ def expected_free_energy(df):
 
 
 # Load the data
-adaptive = load_df("output/KnowledgeTrial_adaptive.csv")
+adaptive = load_df("output/KnowledgeTrial_adaptive_treatment.csv")
 deployment = load_df("output/KnowledgeTrial_deployment.csv")
 
 
@@ -259,8 +264,8 @@ def plot_predictive_check(df, output):
 plot_predictive_check(adaptive, "output/evaluation_treatment.pdf")
 plot_predictive_check(deployment, "output/evaluation_treatment_deployment.pdf")
 
-oracle = load_df("output/KnowledgeTrial_oracle_fast.csv")
-static = load_df("output/KnowledgeTrial_oracle_fast.csv", samples=5)
+oracle = load_df("output/KnowledgeTrial_oracle_treatment.csv", True)
+static = load_df("output/KnowledgeTrial_oracle_treatment.csv", True, samples=5)
 
 rewards_oracle = expected_free_energy(oracle)
 rewards_adaptive = expected_free_energy(adaptive)
@@ -376,6 +381,30 @@ cumulative_frequency(
     static, mean_reward, "output/cumulative_node_frequency_random"
 )
 
+
+def frequency(adaptive, static, mean_reward, output):
+    cmap = plt.get_cmap("RdBu")
+
+    unique_nodes = sorted(static["node_id"].unique())
+    freq_adaptive = adaptive["node_id"].value_counts().to_dict()
+    frequencies_adaptive = [freq_adaptive[node] for node in unique_nodes]
+    freq_static = static["node_id"].value_counts().to_dict()
+    frequencies_static = [freq_static[node] for node in unique_nodes]
+    rewards = [mean_reward[node] for node in unique_nodes]
+
+    fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+    ax.scatter(rewards, frequencies_adaptive, label="Adaptive")
+    ax.scatter(rewards, frequencies_static, label="Even sampling")
+    fig.legend(
+        ncol=2,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.15),
+        frameon=False,
+    )
+    fig.savefig(f"{output}.pdf", bbox_inches="tight")
+
+
+frequency(adaptive, static, mean_reward, "output/frequency")
 
 nodes = rewards_oracle.keys()
 
@@ -496,7 +525,6 @@ def plot_y_distributions_by_z(df, mean_reward, output):
         fig, axes: matplotlib figure and axes objects
     """
     import matplotlib.pyplot as plt
-    import seaborn as sns
     import numpy as np
     from scipy.stats import beta as beta_dist
 
@@ -651,13 +679,13 @@ def plot_y_distributions_by_z(df, mean_reward, output):
     return fig, axes
 
 
+plot_y_distributions_by_z(oracle, mean_reward, "output/posteriors_oracle.pdf")
 plot_y_distributions_by_z(
     adaptive, mean_reward_adaptive, "output/posteriors.pdf"
 )
 plot_y_distributions_by_z(
     deployment, mean_reward_deployment, "output/posteriors_deployment.pdf"
 )
-
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
 
