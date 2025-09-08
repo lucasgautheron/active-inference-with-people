@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+from scipy.stats import entropy
+
+from os.path import exists
 import json
 
 import matplotlib.pyplot as plt
@@ -19,13 +22,7 @@ matplotlib.rcParams["text.latex.preamble"] = (
     r"\usepackage{amsmath}\usepackage{amssymb}\linespread{1}"
 )
 
-import seaborn as sns
-
 from scipy.stats import beta as beta_dist
-
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import PolynomialFeatures
-from sklearn.utils import resample
 
 
 def load_df(source, shift_node_id=False, samples=None):
@@ -38,8 +35,9 @@ def load_df(source, shift_node_id=False, samples=None):
     )
     df = df[df["finalized"] == True]
 
-    if "deployment" in source:
-        participants = pd.read_csv("output/Participant_deployment.csv")
+    participant_data = source.replace("KnowledgeTrial", "Participant")
+    if exists(participant_data):
+        participants = pd.read_csv(participant_data)
         participants = participants[participants["progress"] == 1]
         df = df[df["participant_id"].isin(participants["id"])]
 
@@ -74,18 +72,10 @@ def load_df(source, shift_node_id=False, samples=None):
     return df
 
 
-def expected_free_energy(df):
-    """
-    Active inference function adapted for pandas DataFrame input.
+n_samples = 100000
 
-    Args:
-        df (pd.DataFrame): DataFrame containing trial data
 
-    Returns:
-        int: ID of the best node selected by Active inference
-    """
-    n_samples = 100000
-
+def utility(df):
     # Convert string boolean values to actual booleans
     df = df.copy()
     for col in ["y", "z"]:
@@ -98,23 +88,7 @@ def expected_free_energy(df):
             }
         )
 
-    # Get unique participants and their z values
-    participants = df.groupby("participant_id")["z"].first()
-
-    alpha, beta = 1, 1
-    for z_val in participants:
-        if z_val == True:
-            alpha += 1
-        elif z_val == False:
-            beta += 1
-
-    Phi = np.random.beta(alpha, beta, n_samples)
-    z = np.random.binomial(np.ones(n_samples, dtype=int), Phi)
-
     nodes_ids = sorted(df["node_id"].unique())
-
-    rewards = dict()
-    eig = dict()
     utility = dict()
 
     for node_id in nodes_ids:
@@ -143,25 +117,7 @@ def expected_free_energy(df):
             (2, n_samples),
         )
 
-        y = np.random.binomial(
-            np.ones((2, n_samples), dtype=int),
-            phi,
-            size=(
-                2,
-                n_samples,
-            ),
-        )
-
-        p_y_given_phi = phi * y + (1 - phi) * (1 - y)
-        p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
-
-        p_y_given_phi = p_y_given_phi[z, np.arange(n_samples)]
-        p_y = p_y[z, np.arange(n_samples)]
-        EIG = np.mean(np.log(p_y_given_phi / p_y))
-
-        p_z = z.mean()
-
-        gamma = 0.2
+        gamma = 0.1
         p_z = 0.5
         U = gamma * (
             p_z * phi[1]
@@ -170,11 +126,79 @@ def expected_free_energy(df):
             - (1 - p_z) * phi[0]
         )
 
-        rewards[node_id] = EIG + U
-        eig[node_id] = EIG
         utility[node_id] = U
 
     return utility
+
+
+def education_prediction(df, prob_best):
+    df = df.copy()
+    for col in ["y", "z"]:
+        df[col] = df[col].map(
+            {
+                "True": True,
+                "False": False,
+                True: True,
+                False: False,
+            }
+        )
+
+    df.sort_values(["participant_id", "id"], inplace=True)
+
+    nodes_ids = sorted(df["node_id"].unique())
+
+    phi = dict()
+    utility = dict()
+
+    for node_id in nodes_ids:
+        node_trials = df[df["node_id"] == node_id]
+
+        alpha = np.ones(2)  # [alpha for z=0, alpha for z=1]
+        beta = np.ones(2)  # [beta for z=0, beta for z=1]
+
+        for _, trial in node_trials.iterrows():
+            if pd.isna(trial["z"]):
+                continue
+
+            trial_z = 1 if trial["z"] else 0
+            if trial["y"] == True:
+                alpha[trial_z] += 1
+            elif trial["y"] == False:
+                beta[trial_z] += 1
+
+        phi[node_id] = alpha / (alpha + beta)
+        p_z = 0.5
+        utility[node_id] = (
+            p_z * phi[node_id][1]
+            + (1 - p_z) * (1 - phi[node_id][0])
+            - p_z * (1 - phi[node_id][1])
+            - (1 - p_z) * phi[node_id][0]
+        )
+
+    accuracy = []
+    p = []
+    z = []
+    H = []
+    for participant_id, trials in df.groupby("participant_id"):
+        trials["prob_best"] = trials["node_id"].map(utility.get)
+        trials.sort_values("prob_best", ascending=False, inplace=True)
+        # trials = trials.head(5)
+        p_z = np.ones(1) / 2
+        for trial in trials.to_dict(orient="records"):
+            p_y_given_z = trial["y"] * phi[trial["node_id"]] + (
+                1 - trial["y"]
+            ) * (1 - phi[trial["node_id"]])
+            p_z = p_z * p_y_given_z / (np.sum(p_z * p_y_given_z))
+
+        print(p_z, trials["z"].mean())
+        accuracy.append(trials["z"].mean() == np.argmax(p_z))
+        p.append(p_z[1])
+        z.append(trials["z"].mean())
+        H.append(entropy(p_z, base=2))
+
+    print(len(H))
+
+    return H
 
 
 # Load the data
@@ -218,11 +242,11 @@ def plot_predictive_check(df, output):
             observed_freqs.append(observed_freq)
 
             if n_in_bin > 0:
-                conf_int = beta_dist.ppf(
+                cred_int = beta_dist.ppf(
                     [0.05 / 2, 1 - 0.05 / 2], 1 + n_successes, 1 + n_failures
                 )
-                ci_lowers.append(conf_int[0])
-                ci_uppers.append(conf_int[1])
+                ci_lowers.append(cred_int[0])
+                ci_uppers.append(cred_int[1])
             else:
                 ci_lowers.append(observed_freq)
                 ci_uppers.append(observed_freq)
@@ -267,10 +291,10 @@ plot_predictive_check(deployment, "output/evaluation_treatment_deployment.pdf")
 oracle = load_df("output/KnowledgeTrial_oracle_treatment.csv", True)
 static = load_df("output/KnowledgeTrial_oracle_treatment.csv", True, samples=5)
 
-rewards_oracle = expected_free_energy(oracle)
-rewards_adaptive = expected_free_energy(adaptive)
-rewards_deployment = expected_free_energy(deployment)
-rewards_static = expected_free_energy(static)
+rewards_oracle = utility(oracle)
+rewards_adaptive = utility(adaptive)
+rewards_deployment = utility(deployment)
+rewards_static = utility(static)
 
 mean_reward = {
     node: np.mean(rewards_oracle[node]) for node in rewards_oracle.keys()
@@ -288,6 +312,23 @@ order = sorted(
     key=lambda node: mean_reward[node],
 )
 
+
+def get_best_prob(rewards):
+    node_reward = np.zeros((len(order), n_samples))
+    for node in rewards_oracle.keys():
+        node_reward[order.index(node)] = rewards[node]
+
+    best_node = np.argmax(node_reward, axis=0)
+    prob_best_node = dict()
+    for i, node in enumerate(order):
+        prob_best_node[node] = np.mean(best_node == i)
+
+    return prob_best_node
+
+
+prob_best_node = get_best_prob(rewards_oracle)
+prob_best_node_adaptive = get_best_prob(rewards_adaptive)
+prob_best_node_static = get_best_prob(rewards_static)
 
 mean_reward_adaptive = {
     node: np.mean(rewards_adaptive[node]) for node in rewards_adaptive.keys()
@@ -319,6 +360,24 @@ high_reward_static = {
 
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
+H_oracle = education_prediction(
+    oracle,
+    prob_best_node,
+)
+H_adaptive = education_prediction(
+    adaptive,
+    prob_best_node_adaptive,
+)
+H_static = education_prediction(
+    static,
+    prob_best_node_static,
+)
+ax.plot(np.cumsum(H_oracle))
+ax.plot(np.cumsum(H_adaptive))
+ax.plot(np.cumsum(H_static))
+ax.plot([0, 200], [0, 200], color="black", label="Prior")
+
+plt.savefig("output/progress.pdf", bbox_inches="tight")
 
 nodes = list(mean_reward.keys())
 
@@ -388,19 +447,24 @@ def frequency(adaptive, static, mean_reward, output):
     unique_nodes = sorted(static["node_id"].unique())
     freq_adaptive = adaptive["node_id"].value_counts().to_dict()
     frequencies_adaptive = [freq_adaptive[node] for node in unique_nodes]
-    freq_static = static["node_id"].value_counts().to_dict()
-    frequencies_static = [freq_static[node] for node in unique_nodes]
     rewards = [mean_reward[node] for node in unique_nodes]
 
     fig, ax = plt.subplots(figsize=(3.2, 2.13333))
     ax.scatter(rewards, frequencies_adaptive, label="Adaptive")
-    ax.scatter(rewards, frequencies_static, label="Even sampling")
+    ax.plot(
+        [np.min(rewards), np.max(rewards)],
+        [np.mean(frequencies_adaptive), np.mean(frequencies_adaptive)],
+        label="Even sampling",
+        color=plt.cm.tab10(1),
+    )
     fig.legend(
         ncol=2,
         loc="upper center",
-        bbox_to_anchor=(0.5, 1.15),
+        bbox_to_anchor=(0.5, 1.075),
         frameon=False,
     )
+    ax.set_xlabel("$E[r_j]_{oracle}$\n(Treatment utility)")
+    ax.set_ylabel("Treatment frequency")
     fig.savefig(f"{output}.pdf", bbox_inches="tight")
 
 
@@ -510,48 +574,7 @@ fig.legend(
 plt.savefig("output/reward.pdf", bbox_inches="tight")
 
 
-def plot_y_distributions_by_z(df, mean_reward, output):
-    """
-    Creates a 5x3 grid of plots showing beta distributions fitted to observed y values
-    for each z condition (0,1) across all 15 node_ids, ordered by mean reward from highest to lowest.
-
-    Args:
-        df (pd.DataFrame): DataFrame containing the trial data with columns
-                          ['node_id', 'y', 'z']
-        mean_reward (dict): Dictionary mapping node_id to mean reward values
-        figsize (tuple): Figure size (width, height)
-
-    Returns:
-        fig, axes: matplotlib figure and axes objects
-    """
-    import matplotlib.pyplot as plt
-    import numpy as np
-    from scipy.stats import beta as beta_dist
-
-    questions = (
-        pd.read_csv("static/questions.csv")
-        .set_index("id")["question"]
-        .to_dict()
-    )
-
-    # Order nodes by mean reward (highest to lowest)
-    ordered_nodes = sorted(
-        mean_reward.keys(),
-        key=lambda node: mean_reward[node],
-        reverse=True,
-    )
-
-    # Create 5x3 subplot grid
-    fig, axes = plt.subplots(
-        3,
-        5,
-        figsize=(6.4 * 1.125, 4.8 * 1.125),
-        sharex=True,
-        sharey=True,
-    )
-    axes = axes.flatten()  # Flatten for easier indexing
-
-    # Convert string boolean values to actual booleans if needed
+def clean_df(df):
     df_clean = df.copy()
     for col in ["y", "z"]:
         if col in df_clean.columns:
@@ -566,6 +589,34 @@ def plot_y_distributions_by_z(df, mean_reward, output):
                 }
             )
 
+    return df_clean
+
+
+def plot_y_distributions_by_z(
+    df, df_baseline, mean_reward, output, show_baseline=False
+):
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from scipy.stats import beta as beta_dist
+
+    ordered_nodes = sorted(
+        mean_reward.keys(),
+        key=lambda node: mean_reward[node],
+        reverse=True,
+    )
+
+    fig, axes = plt.subplots(
+        3,
+        5,
+        figsize=(6.4 * 1.125, 4.8 * 1.125),
+        sharex=True,
+        sharey=True,
+    )
+    axes = axes.flatten()
+
+    df_clean = clean_df(df)
+    df_baseline = clean_df(df_baseline)
+
     questions = df_clean.drop_duplicates("node_id").set_index("node_id")
     questions = (
         questions["definition"]
@@ -573,12 +624,11 @@ def plot_y_distributions_by_z(df, mean_reward, output):
         .to_dict()
     )
 
-    # Plot each node
     for i, node_id in enumerate(ordered_nodes):
         ax = axes[i]
 
-        # Filter data for this node
         node_data = df_clean[df_clean["node_id"] == node_id]
+        baseline_data = df_baseline[df_baseline["node_id"] == node_id]
 
         if len(node_data) == 0:
             ax.text(
@@ -591,11 +641,12 @@ def plot_y_distributions_by_z(df, mean_reward, output):
             )
             continue
 
-        # Separate data by z value
         z0_data = node_data[node_data["z"] == False]
         z1_data = node_data[node_data["z"] == True]
 
-        # Create x values for plotting beta distributions
+        z0_baseline = baseline_data[baseline_data["z"] == False]
+        z1_baseline = baseline_data[baseline_data["z"] == True]
+
         x = np.linspace(0, 1, 100)
 
         # Plot beta distribution for z=0
@@ -605,14 +656,40 @@ def plot_y_distributions_by_z(df, mean_reward, output):
             alpha_z0 = successes_z0 + 1  # Beta prior with alpha=1, beta=1
             beta_z0 = failures_z0 + 1
 
+            successes_z0_baseline = z0_baseline[
+                "y"
+            ].sum()  # Count of True values
+            failures_z0_baseline = (
+                len(z0_baseline) - successes_z0_baseline
+            )  # Count of False values
+            alpha_z0_baseline = (
+                successes_z0_baseline + 1
+            )  # Beta prior with alpha=1, beta=1
+            beta_z0_baseline = failures_z0_baseline + 1
+
             y_z0 = beta_dist.pdf(x, alpha_z0, beta_z0)
+            y_z0_baseline = beta_dist.pdf(
+                x, alpha_z0_baseline, beta_z0_baseline
+            )
             ax.plot(
                 x,
                 y_z0,
                 color="#377eb8",
                 linewidth=2,
-                label=("High-scool or less ($z=0$)" if i == 0 else None),
+                label=(
+                    "High-scool or less ($\phi_{j,z=0}$)" if i == 0 else None
+                ),
             )
+            if show_baseline:
+                ax.plot(
+                    x,
+                    y_z0_baseline,
+                    color="#377eb8",
+                    linewidth=1,
+                    alpha=1,
+                    ls="dotted",
+                    label="(Oracle)" if i == 0 else None,
+                )
             ax.fill_between(x, y_z0, alpha=0.3, color="#377eb8")
 
         # Plot beta distribution for z=1
@@ -622,14 +699,39 @@ def plot_y_distributions_by_z(df, mean_reward, output):
             alpha_z1 = successes_z1 + 1  # Beta prior with alpha=1, beta=1
             beta_z1 = failures_z1 + 1
 
+            successes_z1_baseline = z1_baseline[
+                "y"
+            ].sum()  # Count of True values
+            failures_z1_baseline = (
+                len(z1_baseline) - successes_z1_baseline
+            )  # Count of False values
+            alpha_z1_baseline = (
+                successes_z1_baseline + 1
+            )  # Beta prior with alpha=1, beta=1
+            beta_z1_baseline = failures_z1_baseline + 1
+
             y_z1 = beta_dist.pdf(x, alpha_z1, beta_z1)
+            y_z1_baseline = beta_dist.pdf(
+                x, alpha_z1_baseline, beta_z1_baseline
+            )
+
             ax.plot(
                 x,
                 y_z1,
                 color="#ff7f00",
                 linewidth=2,
-                label=("College ($z=1$)" if i == 0 else None),
+                label=("College ($\phi_{j,z=1}$)" if i == 0 else None),
             )
+            if show_baseline:
+                ax.plot(
+                    x,
+                    y_z1_baseline,
+                    color="#ff7f00",
+                    linewidth=1,
+                    alpha=1,
+                    ls="dotted",
+                    label="(Oracle)" if i == 0 else None,
+                )
             ax.fill_between(x, y_z1, alpha=0.3, color="#ff7f00")
 
         # Customize subplot
@@ -679,12 +781,18 @@ def plot_y_distributions_by_z(df, mean_reward, output):
     return fig, axes
 
 
-plot_y_distributions_by_z(oracle, mean_reward, "output/posteriors_oracle.pdf")
 plot_y_distributions_by_z(
-    adaptive, mean_reward_adaptive, "output/posteriors.pdf"
+    oracle, oracle, mean_reward, "output/posteriors_oracle.pdf"
 )
 plot_y_distributions_by_z(
-    deployment, mean_reward_deployment, "output/posteriors_deployment.pdf"
+    adaptive, oracle, mean_reward, "output/posteriors.pdf", True
+)
+plot_y_distributions_by_z(
+    deployment,
+    oracle,
+    mean_reward_deployment,
+    "output/posteriors_deployment.pdf",
+    True,
 )
 
 fig, ax = plt.subplots(figsize=(3.2, 2.13333))
