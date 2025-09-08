@@ -60,7 +60,9 @@ class Oracle:
 
     def __init__(self, domain):
         answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[domain * 15 :, : (domain + 1) * 15]
+        answers = np.stack(answers.values)[
+            domain * 15 :, : (domain + 1) * 15
+        ]
         mask = ~np.any(pd.isna(answers), axis=1)
         answers = answers[mask]
 
@@ -71,9 +73,9 @@ class Oracle:
             for i in range(len(answers))
         ]
 
-        self.education = pd.read_csv("static/education.csv")["college"].values[
-            mask
-        ]
+        self.education = pd.read_csv(
+            "static/education.csv"
+        )["college"].values[mask]
 
         logger.info("Oracle data:")
         logger.info(answers.shape)
@@ -92,7 +94,9 @@ class OptimalDesign:
     def __init__(self):
         pass
 
-    def get_optimal_node(self, candidates, participant, data):
+    def get_optimal_node(
+        self, candidates, participant, data
+    ):
         raise NotImplementedError()
 
 
@@ -124,12 +128,16 @@ class AdaptiveTesting(OptimalDesign):
         that takes item indices as design"""
 
         def model(design):
-            with pyro.plate_stack("plate", design.shape[:-1]):
+            with pyro.plate_stack(
+                "plate", design.shape[:-1]
+            ):
                 # Sample ability parameter for the target participant
                 theta = pyro.sample(
                     "theta",
                     dist.Normal(
-                        self.theta_means[target_participant],
+                        self.theta_means[
+                            target_participant
+                        ],
                         self.theta_sds[target_participant],
                     ),
                 )
@@ -207,7 +215,9 @@ class AdaptiveTesting(OptimalDesign):
         selected_difficulties = difficulties[items.long()]
 
         # Logistic regression model with intercept
-        logit_p = (selected_thetas - selected_difficulties) + intercept
+        logit_p = (
+            selected_thetas - selected_difficulties
+        ) + intercept
         y = pyro.sample(
             "y",
             dist.Bernoulli(
@@ -307,14 +317,24 @@ class AdaptiveTesting(OptimalDesign):
         self.num_participants = num_participants
         self.num_items = num_items
 
-        self.theta_means = torch.full([num_participants], self.prior_mean_theta)
-        self.theta_sds = torch.full([num_participants], self.prior_sd_theta)
+        self.theta_means = torch.full(
+            [num_participants], self.prior_mean_theta
+        )
+        self.theta_sds = torch.full(
+            [num_participants], self.prior_sd_theta
+        )
         self.difficulty_means = torch.full(
             [num_items], self.prior_mean_difficulty
         )
-        self.difficulty_sds = torch.full([num_items], self.prior_sd_difficulty)
-        self.intercept_mean = torch.tensor(self.prior_mean_intercept)
-        self.intercept_sd = torch.tensor(self.prior_sd_intercept)
+        self.difficulty_sds = torch.full(
+            [num_items], self.prior_sd_difficulty
+        )
+        self.intercept_mean = torch.tensor(
+            self.prior_mean_intercept
+        )
+        self.intercept_sd = torch.tensor(
+            self.prior_sd_intercept
+        )
 
     def update_posterior(self, data):
         """Update posterior beliefs based on all collected experimental data"""
@@ -325,16 +345,21 @@ class AdaptiveTesting(OptimalDesign):
 
         for node_id, trials in data["nodes"].items():
             for trial_id, trial_data in trials.items():
-                participants.append(trial_data["participant_id"])
+                participants.append(
+                    trial_data["participant_id"]
+                )
                 items.append(node_id)
                 responses.append(float(trial_data["y"]))
 
         self.participant_index = {
             participant: idx
-            for idx, participant in enumerate(data["participants"])
+            for idx, participant in enumerate(
+                data["participants"]
+            )
         }
         self.item_index = {
-            item: idx for idx, item in enumerate(data["nodes"].keys())
+            item: idx
+            for idx, item in enumerate(data["nodes"].keys())
         }
 
         participants = torch.tensor(
@@ -345,7 +370,8 @@ class AdaptiveTesting(OptimalDesign):
             dtype=torch.long,
         )
         items = torch.tensor(
-            [self.item_index[item] for item in items], dtype=torch.long
+            [self.item_index[item] for item in items],
+            dtype=torch.long,
         )
         responses = torch.tensor(responses)
 
@@ -358,7 +384,9 @@ class AdaptiveTesting(OptimalDesign):
         pyro.clear_param_store()
 
         # The statistical model conditioned on all prior responses
-        conditioned_model = pyro.condition(self._model, {"y": responses})
+        conditioned_model = pyro.condition(
+            self._model, {"y": responses}
+        )
 
         # Instantiate the stochastic variational inference
         svi = SVI(
@@ -372,19 +400,35 @@ class AdaptiveTesting(OptimalDesign):
         for i in range(self.num_steps):
             elbo = svi.step(participants, items)
             if i % 100 == 0:
-                logger.info(f"  Iteration {i}, ELBO: {elbo:.3f}")
+                logger.info(
+                    f"  Iteration {i}, ELBO: {elbo:.3f}"
+                )
 
         # Extract parameters
-        self.theta_means = pyro.param("theta_means").detach().clone()
-        self.theta_sds = pyro.param("theta_sds").detach().clone()
-        self.difficulty_means = pyro.param("mean_difficulties").detach().clone()
-        self.difficulty_sds = pyro.param("sd_difficulties").detach().clone()
-        self.intercept_mean = pyro.param("mean_intercept").detach().clone()
-        self.intercept_sd = pyro.param("sd_intercept").detach().clone()
+        self.theta_means = (
+            pyro.param("theta_means").detach().clone()
+        )
+        self.theta_sds = (
+            pyro.param("theta_sds").detach().clone()
+        )
+        self.difficulty_means = (
+            pyro.param("mean_difficulties").detach().clone()
+        )
+        self.difficulty_sds = (
+            pyro.param("sd_difficulties").detach().clone()
+        )
+        self.intercept_mean = (
+            pyro.param("mean_intercept").detach().clone()
+        )
+        self.intercept_sd = (
+            pyro.param("sd_intercept").detach().clone()
+        )
 
         logger.debug("Posterior update completed")
 
-    def get_optimal_node(self, candidates, participant, data):
+    def get_optimal_node(
+        self, candidates, participant, data
+    ):
         # Update posterior with current data
         self.update_posterior(data)
 
@@ -404,7 +448,8 @@ class AdaptiveTesting(OptimalDesign):
             {
                 "optimizer": torch.optim.Adam,
                 "optim_args": {"lr": self.start_lr},
-                "gamma": (self.end_lr / self.start_lr) ** (1 / self.num_steps),
+                "gamma": (self.end_lr / self.start_lr)
+                ** (1 / self.num_steps),
             }
         )
 
@@ -422,7 +467,11 @@ class AdaptiveTesting(OptimalDesign):
         )
 
         # Retrieve the posterior predictive probability for each design
-        p_y = torch.special.expit(pyro.param("q_logit")).detach().numpy()
+        p_y = (
+            torch.special.expit(pyro.param("q_logit"))
+            .detach()
+            .numpy()
+        )
         p_outcome = dict()
         for idx, candidate in enumerate(candidates):
             p_outcome[candidate] = float(p_y[idx])
@@ -441,13 +490,19 @@ class AdaptiveTesting(OptimalDesign):
         if DEBUG_MODE:
             from matplotlib import pyplot as plt
 
-            entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
+            entropy = -p_y * np.log2(p_y) - (
+                1 - p_y
+            ) * np.log2(1 - p_y)
 
             x = np.linspace(-3, +3, 200)
             y = norm.pdf(
                 x,
-                loc=self.theta_means[self.participant_index[participant.id]],
-                scale=self.theta_sds[self.participant_index[participant.id]],
+                loc=self.theta_means[
+                    self.participant_index[participant.id]
+                ],
+                scale=self.theta_sds[
+                    self.participant_index[participant.id]
+                ],
             )
 
             plt.plot(
@@ -465,10 +520,15 @@ class AdaptiveTesting(OptimalDesign):
                 color = cmap(item % 10)
                 y = norm.pdf(
                     x,
-                    loc=self.difficulty_means[self.item_index[item]]
+                    loc=self.difficulty_means[
+                        self.item_index[item]
+                    ]
                     - self.intercept_mean,
                     scale=np.sqrt(
-                        self.difficulty_sds[self.item_index[item]] ** 2
+                        self.difficulty_sds[
+                            self.item_index[item]
+                        ]
+                        ** 2
                         + self.intercept_sd**2,
                     ),
                 )
@@ -486,24 +546,36 @@ class AdaptiveTesting(OptimalDesign):
                 )
                 plt.scatter(
                     [
-                        self.difficulty_means[self.item_index[item]]
+                        self.difficulty_means[
+                            self.item_index[item]
+                        ]
                         - self.intercept_mean,
                     ],
                     [eig[i]],
                     facecolors="none",
                     edgecolors=color,
                     marker="s",
-                    label="Expected information gain" if i == 0 else None,
+                    label=(
+                        "Expected information gain"
+                        if i == 0
+                        else None
+                    ),
                 )
 
                 plt.scatter(
                     [
-                        self.difficulty_means[self.item_index[item]]
+                        self.difficulty_means[
+                            self.item_index[item]
+                        ]
                         - self.intercept_mean,
                     ],
                     [p_y[i]],
                     color=color,
-                    label="Probability of success $p(y=1)$" if i == 0 else None,
+                    label=(
+                        "Probability of success $p(y=1)$"
+                        if i == 0
+                        else None
+                    ),
                 )
 
             # plt.axhline(epsilon, label=r"Threshold $\varepsilon$")
@@ -522,11 +594,10 @@ class AdaptiveTesting(OptimalDesign):
 
         return optimal_test
 
+
 class KnowledgeTrial(StaticTrial):
 
-    time_estimate = (
-        25  # how long it should take to complete each trial, in seconds
-    )
+    time_estimate = 25  # how long it should take to complete each trial, in seconds
 
     def __init__(
         self,
@@ -616,7 +687,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         logger.info("Initializing optimization module.")
         self.optimizer = (
-            optimizer_class() if optimizer_class is not None else None
+            optimizer_class()
+            if optimizer_class is not None
+            else None
         )
         self.use_participant_data = use_participant_data
 
@@ -636,7 +709,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     ),
                 },
             )
-            for i, question in enumerate(questions.to_dict(orient="records"))
+            for i, question in enumerate(
+                questions.to_dict(orient="records")
+            )
         ]
 
         return nodes
@@ -687,7 +762,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
                     trial.id: {
                         "y": trial.var.y,
                         "z": (
-                            data["participants"][trial.participant_id]["z"]
+                            data["participants"][
+                                trial.participant_id
+                            ]["z"]
                             if self.use_participant_data
                             else None
                         ),
@@ -701,18 +778,23 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
     # overload the default prioritize_networks method
     @log_time_taken
-    def prioritize_networks(self, networks, participant, experiment):
+    def prioritize_networks(
+        self, networks, participant, experiment
+    ):
         if self.optimizer is None:
             return networks
 
         node_network = {
-            network.head.id: i for i, network in enumerate(networks)
+            network.head.id: i
+            for i, network in enumerate(networks)
         }
 
         # retrieve all relevant prior data
         data = self.prior_data()
 
-        assert set(node_network.keys()) <= set(data["nodes"].keys())
+        assert set(node_network.keys()) <= set(
+            data["nodes"].keys()
+        )
 
         # retrieve optimal node
         next_node = self.optimizer.get_optimal_node(
@@ -733,10 +815,13 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         participant,
     ):
         trial.var.y = (
-            trial.answer.lower().strip() in trial.node.definition["answers"]
+            trial.answer.lower().strip()
+            in trial.node.definition["answers"]
         )
         trial.var.z = (
-            int(trial.participant.var.z) if self.use_participant_data else None
+            int(trial.participant.var.z)
+            if self.use_participant_data
+            else None
         )
 
         super().finalize_trial(
@@ -748,7 +833,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
 
 class ActiveInference(OptimalDesign):
-    def get_optimal_node(self, nodes_ids, participant, data):
+    def get_optimal_node(
+        self, nodes_ids, participant, data
+    ):
         z_i = participant.var.z
 
         S = 2000
@@ -765,7 +852,8 @@ class ActiveInference(OptimalDesign):
             [
                 data["participants"][participant_id]["z"]
                 for participant_id in data["participants"]
-                if data["participants"][participant_id]["z"] != None
+                if data["participants"][participant_id]["z"]
+                != None
             ]
         )
 
@@ -777,7 +865,9 @@ class ActiveInference(OptimalDesign):
             alpha = np.ones(2)
             beta = np.ones(2)
 
-            for trial_id, trial in data["nodes"][node_id].items():
+            for trial_id, trial in data["nodes"][
+                node_id
+            ].items():
                 if trial["y"] == True:
                     alpha[trial["z"]] += 1
                 elif trial["y"] == False:
@@ -805,9 +895,13 @@ class ActiveInference(OptimalDesign):
             )
 
             p_y_given_phi = phi * y + (1 - phi) * (1 - y)
-            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
+            p_y = alpha / (alpha + beta) * y + beta / (
+                alpha + beta
+            ) * (1 - y)
 
-            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
+            EIG = np.mean(
+                np.log(p_y_given_phi[z_i] / p_y[z_i])
+            )
 
             gamma = 0.1
             U = gamma * np.mean(
@@ -820,7 +914,9 @@ class ActiveInference(OptimalDesign):
             rewards[node_id] = EIG + U
             eig[node_id] = EIG
             utility[node_id] = U
-            p_outcome[node_id] = float((alpha / (alpha + beta))[z_i].mean())
+            p_outcome[node_id] = float(
+                (alpha / (alpha + beta))[z_i].mean()
+            )
 
         best_node = sorted(
             list(rewards.keys()),
@@ -829,7 +925,11 @@ class ActiveInference(OptimalDesign):
         )[0]
 
         if len(nodes_ids) == 15:
-            with open(f"output/utility_{SETUP}.csv", "a", newline="") as file:
+            with open(
+                f"output/utility_{SETUP}.csv",
+                "a",
+                newline="",
+            ) as file:
                 writer = csv.writer(file)
                 writer.writerow(
                     [
@@ -890,17 +990,25 @@ class Exp(psynet.experiment.Experiment):
         KnowledgeTrialMaker(
             id_="optimal_treatment",
             optimizer_class=(
-                ActiveInference if SETUP == "adaptive" else None
+                ActiveInference
+                if SETUP == "adaptive"
+                else None
             ),  # Active inference w/ a prior preference over outcomes
             domain=1,  # questions about american history
             use_participant_data=True,  # optimization requires participant metadata
-            expected_trials_per_participant=5 if SETUP == "adaptive" else 15,
-            max_trials_per_participant=5 if SETUP == "adaptive" else 15,
+            expected_trials_per_participant=(
+                5 if SETUP == "adaptive" else 15
+            ),
+            max_trials_per_participant=(
+                5 if SETUP == "adaptive" else 15
+            ),
         ),
         KnowledgeTrialMaker(
             id_="optimal_test",
             optimizer_class=(
-                AdaptiveTesting if SETUP == "adaptive" else None
+                AdaptiveTesting
+                if SETUP == "adaptive"
+                else None
             ),  # Bayesian adaptive design w/ an item-response model
             domain=0,  # questions about the solar system
             use_participant_data=False,  # optimization does not require participant metadata
