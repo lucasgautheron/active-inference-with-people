@@ -520,10 +520,7 @@ class AdaptiveTesting(OptimalDesign):
             )
             plt.clf()
 
-        return optimal_test, {
-            0: 1 - p_outcome[optimal_test],
-            1: p_outcome[optimal_test],
-        }
+        return optimal_test
 
 class KnowledgeTrial(StaticTrial):
 
@@ -555,9 +552,6 @@ class KnowledgeTrial(StaticTrial):
 
         # Relevant participant metadata
         self.var.z = None
-
-        # Posterior predictive probability of given answer
-        self.var.p = None
 
     def show_trial(self, experiment, participant):
         question = self.definition["question"]
@@ -652,15 +646,7 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         data = {"nodes": dict(), "participants": dict()}
 
         # List participants involved in this trial maker
-        participants = (
-            db.session.query(Participant)
-            .join(Participant._module_states)
-            .filter(
-                ModuleState.module_id == self.id, ModuleState.started == True
-            )
-            .distinct()
-            .all()
-        )
+        participants = self.started_participants
 
         data["participants"] = {
             participant.id: {
@@ -680,10 +666,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # Fetch all trials that belong to this trial maker
         trials = Trial.query.filter(
-            Trial.failed == False,
-            Trial.finalized == True,
-            Trial.is_repeat_trial == False,
             Trial.trial_maker_id == self.id,
+            Trial.finalized == True,
+            Trial.failed == False,
+            Trial.is_repeat_trial == False,
         ).all()
 
         trials_by_node = {}
@@ -723,19 +709,15 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             network.head.id: i for i, network in enumerate(networks)
         }
 
-
         # retrieve all relevant prior data
         data = self.prior_data()
 
         assert set(node_network.keys()) <= set(data["nodes"].keys())
 
         # retrieve optimal node
-        next_node, p = self.optimizer.get_optimal_node(
+        next_node = self.optimizer.get_optimal_node(
             list(node_network.keys()), participant, data
         )
-
-        # store the optimizer estimate of p(y)
-        participant.var.set("p_y", p)
 
         # early-stopping
         if next_node is None:
@@ -756,7 +738,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         trial.var.z = (
             int(trial.participant.var.z) if self.use_participant_data else None
         )
-        trial.var.p = participant.var.get("p_y", None)
 
         super().finalize_trial(
             answer,
@@ -858,7 +839,7 @@ class ActiveInference(OptimalDesign):
                     ]
                 )
 
-        return best_node, {0: 1 - p_outcome[best_node], 1: p_outcome[best_node]}
+        return best_node
 
 
 class Exp(psynet.experiment.Experiment):
