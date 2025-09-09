@@ -684,9 +684,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
         # Fetch all nodes related to this trial maker
         start = time.time()
-        nodes = self.network_class.query.filter_by(
-            trial_maker_id=self.id, full=False, failed=False
+        networks = self.network_class.query.filter_by(
+            trial_maker_id=self.id,
         ).all()
+        nodes = [network.head for network in networks]
         logger.info(f"Nodes query: {time.time() - start:.3f}s")
 
         # Fetch all trials that belong to this trial maker
