@@ -7,8 +7,7 @@ from markupsafe import Markup
 import psynet.experiment
 from psynet.modular_page import TextControl, ModularPage
 from psynet.page import InfoPage, SuccessfulEndPage
-from psynet.timeline import Timeline, CodeBlock, ModuleState
-from psynet.participant import Participant
+from psynet.timeline import Timeline, CodeBlock
 from psynet.trial.main import Trial
 from psynet.trial.static import (
     StaticNode,
@@ -21,8 +20,6 @@ from psynet.demography.general import (
     FormalEducation,
 )
 from psynet.utils import log_time_taken
-
-from dallinger import db
 
 import torch
 import pyro
@@ -50,44 +47,6 @@ logging.basicConfig(
     level=logging.DEBUG if DEBUG_MODE else logging.INFO,
 )
 logger = logging.getLogger()
-
-
-class Oracle:
-    """
-    Oracle for simulating the experiment
-    using real human data from Dubourg et al., 2025
-    """
-
-    def __init__(self, domain):
-        answers = pd.read_csv("static/answers.csv")
-        answers = np.stack(answers.values)[
-            domain * 15 :, : (domain + 1) * 15
-        ]
-        mask = ~np.any(pd.isna(answers), axis=1)
-        answers = answers[mask]
-
-        self.answers = [
-            {
-                "answers": answers[i],
-            }
-            for i in range(len(answers))
-        ]
-
-        self.education = pd.read_csv(
-            "static/education.csv"
-        )["college"].values[mask]
-
-        logger.info("Oracle data:")
-        logger.info(answers.shape)
-
-    def answer(self, participant_id: int, item: int):
-        return self.answers[participant_id]["answers"][item]
-
-    def college(self, participant_id: int):
-        return self.education[participant_id]
-
-
-oracle = Oracle(domain=0)
 
 
 class OptimalDesign:
@@ -637,10 +596,7 @@ class KnowledgeTrial(StaticTrial):
             ),
             TextControl(
                 block_copy_paste=True,
-                bot_response=lambda: oracle.answer(
-                    participant.id,
-                    self.definition["item_id"],
-                ),
+                bot_response=lambda: "",
             ),
             time_estimate=self.time_estimate,
         )
@@ -735,9 +691,10 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         }
 
         # Fetch all nodes related to this trial maker
-        nodes = self.network_class.query.filter_by(
-            trial_maker_id=self.id, full=False, failed=False
+        networks = self.network_class.query.filter_by(
+            trial_maker_id=self.id,
         ).all()
+        nodes = [network.head for network in networks]
 
         # Fetch all trials that belong to this trial maker
         trials = Trial.query.filter(
@@ -960,6 +917,17 @@ class Exp(psynet.experiment.Experiment):
         MainConsent(),
         Age(),
         FormalEducation(),
+        CodeBlock(
+            lambda participant: participant.var.set(
+                "z",
+                participant.answer
+                in [
+                    "college",
+                    "graduate_school",
+                    "postgraduate_degree_or_higher",
+                ],
+            )
+        ),
         InfoPage(
             Markup(
                 f"<h3>Before we begin...</h3>"
@@ -968,24 +936,6 @@ class Exp(psynet.experiment.Experiment):
                 f"<div style='margin: 10px;'>Please do <i>not</i> write your answer as sentences. For instance, if the question is: what is the current year? Please just answer '2025'. Do <i>NOT</i> answer, say, 'The current year is 2025'. </div>"
             ),
             time_estimate=15,
-        ),
-        CodeBlock(
-            lambda participant: participant.var.set(
-                "z",
-                (
-                    int(oracle.college(participant.id))
-                    if DEBUG_MODE
-                    else (
-                        participant.answer
-                        in [
-                            "college",
-                            "graduate_school",
-                            "postgraduate_degree_or_higher",
-                        ]
-                    )
-                    * 1
-                ),
-            )
         ),
         KnowledgeTrialMaker(
             id_="optimal_treatment",
