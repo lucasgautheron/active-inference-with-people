@@ -58,8 +58,16 @@ class OptimalDesign:
         self.prior_mean_intercept = torch.tensor(0.0)
         self.prior_sd_intercept = torch.tensor(1.0)
 
-        # Duration parameter priors (exponential with rate=1)
-        self.prior_tau_rate = torch.tensor(1.0)
+        # Duration parameter priors (log-normal parameters)
+        # Priors for mu (location parameter of log-normal)
+        self.prior_mean_log_duration_mu = torch.tensor(-1.0)
+        self.prior_sd_log_duration_mu = torch.tensor(1.0)
+
+        # Priors for sigma (scale parameter of log-normal)
+        self.prior_mean_log_duration_sigma = torch.tensor(
+            0.25
+        )
+        self.prior_sd_log_duration_sigma = torch.tensor(0.25)
 
         self.theta_means = torch.empty(0)
         self.theta_sds = torch.empty(0)
@@ -68,9 +76,11 @@ class OptimalDesign:
         self.intercept_mean = torch.tensor(0.0)
         self.intercept_sd = torch.tensor(0.0)
 
-        # Duration parameters (log-normal guide parameters)
-        self.log_tau_mus = torch.empty(0)
-        self.log_tau_sds = torch.empty(0)
+        # Duration parameters (log-normal parameters for each item)
+        self.log_duration_mu_means = torch.empty(0)
+        self.log_duration_mu_sds = torch.empty(0)
+        self.log_duration_sigma_means = torch.empty(0)
+        self.log_duration_sigma_sds = torch.empty(0)
 
         # EIG computation parameters
         self.num_steps = 400
@@ -114,14 +124,31 @@ class OptimalDesign:
                     ),
                 ).unsqueeze(-1)
 
-                # Sample duration parameter for this specific item
-                item_tau = pyro.sample(
-                    "tau",
-                    dist.LogNormal(
-                        self.log_tau_mus[item_idx],
-                        self.log_tau_sds[item_idx],
+                # Sample log-normal parameters for this specific item
+                item_mu = pyro.sample(
+                    "duration_mu",
+                    dist.Normal(
+                        self.log_duration_mu_means[
+                            item_idx
+                        ],
+                        self.log_duration_mu_sds[item_idx],
                     ),
                 ).unsqueeze(-1)
+
+                item_sigma_raw = pyro.sample(
+                    "duration_sigma",
+                    dist.Normal(
+                        self.log_duration_sigma_means[
+                            item_idx
+                        ],
+                        self.log_duration_sigma_sds[
+                            item_idx
+                        ],
+                    ),
+                ).unsqueeze(-1)
+
+                # Exponentiate to ensure positivity
+                item_sigma = torch.exp(item_sigma_raw)
 
                 logit_p = (theta - difficulties) + intercept
 
@@ -132,10 +159,12 @@ class OptimalDesign:
                     ).to_event(1),
                 )
 
-                # Sample duration from exponential distribution
+                # Sample duration from log-normal distribution
                 x = pyro.sample(
                     "x",
-                    dist.Exponential(item_tau).to_event(1),
+                    dist.LogNormal(
+                        item_mu, item_sigma
+                    ).to_event(1),
                 )
 
                 return y
@@ -181,17 +210,39 @@ class OptimalDesign:
             ),
         )
 
-        # Sample duration parameters for all items
-        taus = pyro.sample(
-            "taus",
-            dist.Exponential(self.prior_tau_rate)
+        # Sample log-normal mu parameters for all items
+        duration_mus = pyro.sample(
+            "duration_mus",
+            dist.Normal(
+                self.prior_mean_log_duration_mu,
+                self.prior_sd_log_duration_mu,
+            )
+            .expand([self.num_items])
+            .to_event(1),
+        )
+
+        # Sample log-normal sigma parameters for all items (using Normal, will exponentiate)
+        duration_sigmas = pyro.sample(
+            "duration_sigmas",
+            dist.Normal(
+                self.prior_mean_log_duration_sigma,
+                self.prior_sd_log_duration_sigma,
+            )
             .expand([self.num_items])
             .to_event(1),
         )
 
         selected_thetas = thetas[participants.long()]
         selected_difficulties = difficulties[items.long()]
-        selected_taus = taus[items.long()]
+        selected_duration_mus = duration_mus[items.long()]
+        selected_duration_sigmas = duration_sigmas[
+            items.long()
+        ]
+
+        # Exponentiate sigma to ensure positivity for log-normal distribution
+        selected_duration_sigmas = torch.exp(
+            selected_duration_sigmas
+        )
 
         # Logistic regression model with intercept
         logit_p = (
@@ -204,11 +255,14 @@ class OptimalDesign:
             ).to_event(1),
         )
 
-        # Duration model - exponential distribution with item-specific rates
+        # Duration model - log-normal distribution with item-specific parameters
         if durations is not None:
             x = pyro.sample(
                 "x",
-                dist.Exponential(selected_taus).to_event(1),
+                dist.LogNormal(
+                    selected_duration_mus,
+                    selected_duration_sigmas,
+                ).to_event(1),
             )
 
         return y
@@ -282,21 +336,47 @@ class OptimalDesign:
             ),
         )
 
-        # Guide for duration parameters (log-normal for each item)
-        log_tau_mu_params = pyro.param(
-            "log_tau_mu_params",
-            torch.zeros(self.num_items),
+        # Guide for log-normal mu parameters
+        duration_mu_means = pyro.param(
+            "duration_mu_means",
+            self.prior_mean_log_duration_mu.expand(
+                [self.num_items]
+            ).clone(),
         )
-        log_tau_sd_params = pyro.param(
-            "log_tau_sd_params",
-            torch.ones(self.num_items),
+        duration_mu_sds = pyro.param(
+            "duration_mu_sds",
+            self.prior_sd_log_duration_mu.expand(
+                [self.num_items]
+            ).clone(),
             constraint=positive,
         )
         pyro.sample(
-            "taus",
-            dist.LogNormal(
-                log_tau_mu_params,
-                log_tau_sd_params,
+            "duration_mus",
+            dist.Normal(
+                duration_mu_means,
+                duration_mu_sds,
+            ).to_event(1),
+        )
+
+        # Guide for log-normal sigma parameters (using Normal, will exponentiate)
+        duration_sigma_means = pyro.param(
+            "duration_sigma_means",
+            self.prior_mean_log_duration_sigma.expand(
+                [self.num_items]
+            ).clone(),
+        )
+        duration_sigma_sds = pyro.param(
+            "duration_sigma_sds",
+            self.prior_sd_log_duration_sigma.expand(
+                [self.num_items]
+            ).clone(),
+            constraint=positive,
+        )
+        pyro.sample(
+            "duration_sigmas",
+            dist.Normal(
+                duration_sigma_means,
+                duration_sigma_sds,
             ).to_event(1),
         )
 
@@ -341,9 +421,19 @@ class OptimalDesign:
             self.prior_sd_intercept
         )
 
-        # Initialize duration parameters (log-normal guide parameters for each item)
-        self.log_tau_mus = torch.zeros(num_items)
-        self.log_tau_sds = torch.ones(num_items)
+        # Initialize log-normal duration parameters for each item
+        self.log_duration_mu_means = torch.full(
+            [num_items], self.prior_mean_log_duration_mu
+        )
+        self.log_duration_mu_sds = torch.full(
+            [num_items], self.prior_sd_log_duration_mu
+        )
+        self.log_duration_sigma_means = torch.full(
+            [num_items], self.prior_mean_log_duration_sigma
+        )
+        self.log_duration_sigma_sds = torch.full(
+            [num_items], self.prior_sd_log_duration_sigma
+        )
 
     def update_posterior(self, data):
         """Update posterior beliefs based on all collected experimental data"""
@@ -441,12 +531,22 @@ class OptimalDesign:
             pyro.param("sd_intercept").detach().clone()
         )
 
-        # Extract duration parameters
-        self.log_tau_mus = (
-            pyro.param("log_tau_mu_params").detach().clone()
+        # Extract log-normal duration parameters
+        self.log_duration_mu_means = (
+            pyro.param("duration_mu_means").detach().clone()
         )
-        self.log_tau_sds = (
-            pyro.param("log_tau_sd_params").detach().clone()
+        self.log_duration_mu_sds = (
+            pyro.param("duration_mu_sds").detach().clone()
+        )
+        self.log_duration_sigma_means = (
+            pyro.param("duration_sigma_means")
+            .detach()
+            .clone()
+        )
+        self.log_duration_sigma_sds = (
+            pyro.param("duration_sigma_sds")
+            .detach()
+            .clone()
         )
 
         print("Posterior update completed")
@@ -501,18 +601,55 @@ class OptimalDesign:
         for idx, candidate in enumerate(candidates):
             p_outcome[candidate] = float(p_y[idx])
 
+        G = np.copy(eig.detach().numpy())
+        U = np.zeros(len(G))
+        p_slow = np.zeros(len(G))
+        for i in range(len(eig)):
+            mu = self.log_duration_mu_means[
+                self.item_index[candidates[i]]
+            ]
+            sigma_log = self.log_duration_sigma_means[
+                self.item_index[candidates[i]]
+            ]
+            sigma = np.exp(sigma_log)
+            tau = lognorm.rvs(s=sigma, scale=np.exp(mu), size=10000)
+            p_slow[i] = np.mean(tau>20)
+            U[i] = -0.04*np.mean(tau>20)
+            print("U:", U[i])
+
+        G += U
+
         # Find the item with maximum EIG
-        best_idx = torch.argmax(eig)
+        # best_idx = torch.argmax(eig)
+        best_idx = np.argmax(G)
         optimal_test = candidates[best_idx]
         best_eig = eig.detach().max()
 
-        # Apply the early-stopping criterion
+
+        import csv
+        with open(f"output/duration.csv", "a", newline="") as file:
+            for i in range(len(candidates)):
+                writer = csv.writer(file)
+                writer.writerow(
+                    [
+                        participant,
+                        15 - len(candidates),
+                        candidates[i],
+                        eig[i].detach().numpy(),
+                        U[i],
+                        G[i],
+                        p_slow[i],
+                        self.difficulty_means[self.item_index[candidates[i]]].detach().numpy()
+                    ]
+                )
+
+            # Apply the early-stopping criterion
         epsilon = 0.04
         if best_eig < epsilon:
             print("Early stopping")
             return None
 
-        if True:
+        if False:
             from matplotlib import pyplot as plt
 
             entropy = -p_y * np.log2(p_y) - (
@@ -570,11 +707,11 @@ class OptimalDesign:
                         ]
                         - self.intercept_mean,
                     ],
-                    [eig[i]],
+                    [G[i]],
                     facecolors="none",
                     edgecolors=color,
                     marker="s",
-                    label="EIG" if i == 0 else None,
+                    label="EFE (G)" if i == 0 else None,
                 )
 
                 plt.scatter(
@@ -602,24 +739,35 @@ class OptimalDesign:
             plt.clf()
 
             fig, ax = plt.subplots()
-            x = np.linspace(0, 10, 200)
+            x = np.linspace(0, 30, 200)
             for i in range(len(candidates)):
                 item = candidates[i]
+
+                mu = self.log_duration_mu_means[
+                    self.item_index[item]
+                ]
+                sigma_log = self.log_duration_sigma_means[
+                    self.item_index[item]
+                ]
+                sigma = np.exp(
+                    sigma_log
+                )  # Exponentiate to get actual sigma
+
                 y = lognorm.pdf(
-                    x,
-                    loc=self.log_tau_mus[
-                        self.item_index[item]
-                    ],
-                    s=self.log_tau_sds[
-                        self.item_index[item]
-                    ],
+                    x, s=sigma, scale=np.exp(mu)
                 )
+
                 color = cmap(i % 10)
-                ax.set_xlim(0, 10)
+                ax.set_xlim(0, 30)
+                ax.plot(
+                    x, y, color=color, label=f"Item {item}"
+                )
 
-                ax.plot(x, y, color=color)
-
-            fig.savefig("output/test_simul_time_{}.png".format(participant))
+            fig.savefig(
+                "output/test_simul_time_{}.png".format(
+                    participant
+                )
+            )
             plt.clf()
 
         return optimal_test
@@ -710,6 +858,10 @@ class Simulator:
             self.add_participant(participant_id)
             self.process_participant(participant_id)
 
+        import pickle
+        with open("output/duration_data.pickle", "wb") as f:
+            pickle.dump(self.data, f)
+
         return self.data
 
 
@@ -720,7 +872,7 @@ def simulate():
     print("Running oracle simulation...")
     oracle = Simulator(
         strategy="active_inference",
-        nodes=np.arange(15, 31),
+        nodes=np.arange(1, 15+1),
         gamma=1,
     ).simulate()
 
