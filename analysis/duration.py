@@ -60,14 +60,14 @@ class OptimalDesign:
 
         # Duration parameter priors (log-normal parameters)
         # Priors for mu (location parameter of log-normal)
-        self.prior_mean_log_duration_mu = torch.tensor(-1.0)
+        self.prior_mean_log_duration_mu = torch.tensor(1.0)
         self.prior_sd_log_duration_mu = torch.tensor(1.0)
 
         # Priors for sigma (scale parameter of log-normal)
         self.prior_mean_log_duration_sigma = torch.tensor(
-            0.25
+            1.0
         )
-        self.prior_sd_log_duration_sigma = torch.tensor(0.25)
+        self.prior_sd_log_duration_sigma = torch.tensor(0.5)
 
         self.theta_means = torch.empty(0)
         self.theta_sds = torch.empty(0)
@@ -605,16 +605,31 @@ class OptimalDesign:
         U = np.zeros(len(G))
         p_slow = np.zeros(len(G))
         for i in range(len(eig)):
-            mu = self.log_duration_mu_means[
-                self.item_index[candidates[i]]
-            ]
-            sigma_log = self.log_duration_sigma_means[
-                self.item_index[candidates[i]]
-            ]
-            sigma = np.exp(sigma_log)
-            tau = lognorm.rvs(s=sigma, scale=np.exp(mu), size=10000)
-            p_slow[i] = np.mean(tau>20)
-            U[i] = -0.04*np.mean(tau>20)
+            item_idx = self.item_index[candidates[i]]
+
+            mu = np.random.normal(
+                self.log_duration_mu_means[
+                    item_idx
+                ].numpy(),
+                self.log_duration_mu_sds[item_idx].numpy(),
+                size=10000,
+            )
+
+            # Sample sigma_log from its posterior distribution
+            sigma_log = np.random.normal(
+                self.log_duration_sigma_means[
+                    item_idx
+                ].numpy(),
+                self.log_duration_sigma_sds[
+                    item_idx
+                ].numpy(),
+                size=10000,
+            )
+
+            # Sample tau from log-normal distribution using the sampled parameters
+            tau = np.random.lognormal(mu, np.exp(sigma_log))
+            p_slow[i] = np.mean(tau > 20)
+            U[i] = -0.04 * np.mean(tau > 20)
             print("U:", U[i])
 
         G += U
@@ -625,9 +640,11 @@ class OptimalDesign:
         optimal_test = candidates[best_idx]
         best_eig = eig.detach().max()
 
-
         import csv
-        with open(f"output/duration.csv", "a", newline="") as file:
+
+        with open(
+            f"output/duration.csv", "a", newline=""
+        ) as file:
             for i in range(len(candidates)):
                 writer = csv.writer(file)
                 writer.writerow(
@@ -639,7 +656,11 @@ class OptimalDesign:
                         U[i],
                         G[i],
                         p_slow[i],
-                        self.difficulty_means[self.item_index[candidates[i]]].detach().numpy()
+                        self.difficulty_means[
+                            self.item_index[candidates[i]]
+                        ]
+                        .detach()
+                        .numpy(),
                     ]
                 )
 
@@ -859,6 +880,7 @@ class Simulator:
             self.process_participant(participant_id)
 
         import pickle
+
         with open("output/duration_data.pickle", "wb") as f:
             pickle.dump(self.data, f)
 
@@ -872,7 +894,7 @@ def simulate():
     print("Running oracle simulation...")
     oracle = Simulator(
         strategy="active_inference",
-        nodes=np.arange(1, 15+1),
+        nodes=np.arange(1, 15 + 1),
         gamma=1,
     ).simulate()
 
