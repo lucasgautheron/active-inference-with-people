@@ -145,6 +145,14 @@ class OptimalDesign:
             ]
 
             return random.choice(candidates)
+        elif strategy == "greedy":
+            maximum_U = max([np.mean(utility[node]) for node in utility.keys()])
+            candidates = [
+                node
+                for node in G.keys()
+                if np.abs(utility[node].mean() - maximum_U) < 1e-5
+            ]
+            return random.choice(candidates)
         elif strategy == "thompson_sampling":
             p_thompson = get_best_prob(utility)
 
@@ -156,7 +164,7 @@ class OptimalDesign:
         elif strategy == "exploration_sampling":
             p_thompson = get_best_prob(utility)
             denominator = np.sum(
-                [p_thompson[node] for node in utility]
+                [p_thompson[node] * (1 - p_thompson[node]) for node in utility]
             )
             p_exploration = {
                 node: p_thompson[node]
@@ -515,7 +523,7 @@ from os.path import exists
 
 
 # Example usage:
-def simulate():
+def simulate(strategies, output):
 
     # Run oracle simulation
     print("Running oracle simulation...")
@@ -523,14 +531,7 @@ def simulate():
         strategy="oracle", nodes=np.arange(15, 31), gamma=1
     ).simulate()
 
-    strategies = [
-        "static",
-        ("active_inference", 0.1),
-        ("active_inference", 0.2),
-        ("active_inference", 0.3),
-        "thompson_sampling",
-        "exploration_sampling",
-    ]
+
 
     # Evaluate strategy accuracy with parallelization
     print("Evaluating strategies for 15 treatments...")
@@ -566,9 +567,9 @@ def simulate():
             ),
         ]
     )
-    results.to_parquet("output/rl_large_randomized.parquet")
+    results.to_parquet(output)
     print(
-        "Results saved to output/rl_large_randomized.parquet"
+        f"Results saved to {output}"
     )
 
 
@@ -655,6 +656,13 @@ strategy_labels = {
     "exploration_sampling": "Exploration sampling",
 }
 
+colors = {
+    "static": 4,
+    "active_inference": 0,
+    "thompson_sampling": 9,
+    "exploration_sampling": 8,
+}
+
 
 def plot_condition(df, plot_function, output):
     fig, ax = plt.subplots(figsize=(8.5, 3))
@@ -721,6 +729,12 @@ def plot_accuracy(df, fig, ax, labels):
             else f"{strategy_label} ($\gamma={row['gamma']:.2f}$)"
         )
 
+        color = colors[row["strategy"]]
+        if row["strategy"] == "active_inference":
+            color += [0.3, 0.2, 0.1].index(row["gamma"])
+
+        color = plt.cm.tab20c(color)
+
         prev_strategy = row["strategy"]
 
         accuracies = row["accuracies"]
@@ -736,16 +750,24 @@ def plot_accuracy(df, fig, ax, labels):
         ax.bar(
             [x],
             [mean],
-            color=plt.cm.tab10(i),
+            color=color,
             alpha=0.25,
         )
 
-        ax.scatter([x], [mean], color=plt.cm.tab10(i))
+        ax.scatter([x], [mean], color=color)
         ax.errorbar(
             [x],
             [mean],
             ([mean - low], [high - mean]),
-            color=plt.cm.tab10(i),
+            color=color,
+        )
+
+        ax.text(
+            x,
+            0.025,
+            f"{mean:.2f}",
+            ha="center",
+            va="bottom",
         )
 
     ax.set_ylim(0, 0.9)
@@ -772,11 +794,18 @@ def plot_information_gain(df, fig, ax, labels):
         else:
             x += 2
 
+        strategy_label = strategy_labels[row["strategy"]]
         labels[x] = (
-            row["strategy"]
+            strategy_label
             if row["strategy"] != "active_inference"
-            else f"{row['strategy']} ($\\gamma={row['gamma']:.2f}$)"
+            else f"{strategy_label} ($\gamma={row['gamma']:.2f}$)"
         )
+
+        color = colors[row["strategy"]]
+        if row["strategy"] == "active_inference":
+            color += [0.3, 0.2, 0.1].index(row["gamma"])
+
+        color = plt.cm.tab20c(color)
 
         prev_strategy = row["strategy"]
 
@@ -788,22 +817,30 @@ def plot_information_gain(df, fig, ax, labels):
 
         print(mean, row["accuracy"])
 
-        ax.bar(
-            [x],
-            [mean],
-            color=plt.cm.tab10(i),
-            alpha=0.25,
+        violin = ax.violinplot(
+            dataset=entropies,
+            positions=[x],
+            showextrema=False
         )
 
-        ax.scatter([x], [mean], color=plt.cm.tab10(i))
+        print(violin.keys())
+
+        for pc in violin["bodies"]:
+            pc.set_facecolor(color)
+            pc.set_edgecolor(color)
+            pc.set_alpha(0.25)
+
+        ax.scatter([x], [mean], color=color)
         ax.errorbar(
             [x],
             [mean],
             ([mean - low], [high - mean]),
-            color=plt.cm.tab10(i),
+            color=color,
+            capsize=4
         )
 
-    ax.set_ylabel("$IG(\\hat{j}$")
+    ax.set_ylabel("$IG(\\hat{j})$")
+    ax.set_ylim(0.25, 4)
 
     return labels
 
@@ -819,8 +856,25 @@ def plot(df):
 
 
 if __name__ == "__main__":
+    strategies = [
+        "exploration_sampling"
+    ]
+    output = "output/rl_exploration_sampling.parquet"
+    simulate(strategies, output)
+
     if exists("output/rl_large_randomized.parquet"):
-        results = pd.read_parquet("output/rl_large_randomized.parquet")
+        results = pd.read_parquet(
+            "output/rl_large_randomized.parquet"
+        )
         plot(results)
     else:
-        simulate()
+        strategies = [
+            "static",
+            ("active_inference", 0.1),
+            ("active_inference", 0.2),
+            ("active_inference", 0.3),
+            "thompson_sampling",
+            "exploration_sampling",
+        ]
+        output="output/rl_large_randomized.parquet"
+        simulate(strategies, output)
