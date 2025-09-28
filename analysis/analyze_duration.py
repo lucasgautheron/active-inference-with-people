@@ -185,27 +185,29 @@ ax.errorbar(
     capsize=5,
     capthick=2,
 )
-ax.set_xlim(-0.5, 2)
+ax.set_xlim(-1.25, +1.25)
 ax.set_ylim(-0.5, 2)
 ax.axhline(0, color="black", lw=1)
 ax.text(
-    0.95,
+    0.5,
     0.95,
     f"\\scriptsize $\mu={mean_delta:.3f}$",
-    ha="right",
+    ha="center",
     va="top",
     transform=ax.transAxes,
 )
 ax.text(
-    0.95,
+    0.5,
     0.85,
     f"\\scriptsize $CI_{{95\\%}}=[{ci_lower:.3f}, {ci_upper:.3f}]$",
-    ha="right",
+    ha="center",
     va="top",
     transform=ax.transAxes,
 )
 ax.set_xticks([], [])
-ax.set_ylabel("Average time saved per trial\n$\\delta t$ (s)")
+ax.set_ylabel(
+    "Average time saved per trial\n$\\delta t$ (s)"
+)
 ax.yaxis.set_label_position("right")
 ax.yaxis.tick_right()
 
