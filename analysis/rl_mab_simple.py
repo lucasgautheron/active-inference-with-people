@@ -464,16 +464,65 @@ linestyles = {
 
 
 def plot_combined_regret(df):
+    # Create figure with 2 rows, 3 columns
     fig, axes = plt.subplots(
-        3, 3, figsize=(12.5 * 0.8, 10 * 0.8), sharey="row"
+        4, 3, figsize=(12.5 * 0.7, 10 * 0.7 * 4/3), sharey="row"
     )
 
+    # Treatment counts to plot
     treatment_counts = [5, 10, 30]
+
+    for col, n_treatments in enumerate(treatment_counts):
+        ax = axes[0, col]
+        df_subset = df[
+            df["total_treatments"] == n_treatments
+        ]
+
+        for (strategy, gamma), runs in df_subset.groupby(
+            ["strategy", "gamma"]
+        ):
+            runs["correct"] = runs["current_best_treatment"] == runs["true_best_treatment"]
+            iterations = runs.groupby("iteration").agg(
+                correct=(
+                    "correct",
+                    "mean",
+                ),
+            )
+
+            strategy_label = strategy_labels[strategy]
+            label = (
+                strategy_label
+                if strategy != "active_inference"
+                else f"{strategy_label} ($\gamma={gamma:.1f}$)"
+            )
+
+            color = colors[strategy]
+            if strategy == "active_inference":
+                color += [0.3, 0.2, 0.1].index(gamma)
+
+            color = plt.cm.tab20c(color)
+
+            indices = np.arange(1, len(iterations), 10)
+            ax.plot(
+                indices,
+                iterations["correct"].values[indices],
+                label=label,
+                color=color,
+                ls=linestyles[strategy],
+            )
+
+        ax.set_ylim(0, 1)
+        ax.set_title(f"{n_treatments} treatments")
+        # ax.set_xlabel("Iteration")
+        if col == 0:
+            ax.set_ylabel("Best arm identification")
 
     # Top row: Policy regret
     for col, n_treatments in enumerate(treatment_counts):
-        ax = axes[0, col]
-        df_subset = df[df["total_treatments"] == n_treatments]
+        ax = axes[1, col]
+        df_subset = df[
+            df["total_treatments"] == n_treatments
+        ]
 
         for (strategy, gamma), runs in df_subset.groupby(
             ["strategy", "gamma"]
@@ -483,7 +532,10 @@ def plot_combined_regret(df):
                     "true_utility_current_best",
                     "mean",
                 ),
-                true_utility_true_best=("true_utility_true_best", "mean"),
+                true_utility_true_best=(
+                    "true_utility_true_best",
+                    "mean",
+                ),
             )
             iterations["policy_regret"] = (
                 iterations["true_utility_true_best"]
@@ -514,13 +566,16 @@ def plot_combined_regret(df):
 
         ax.set_ylim(0, 0.5)
         ax.set_title(f"{n_treatments} treatments")
+        # ax.set_xlabel("Iteration")
         if col == 0:
             ax.set_ylabel("Policy regret")
 
-    # Middle row: Sample regret (cumulative)
+    # Bottom row: Sample regret (cumulative)
     for col, n_treatments in enumerate(treatment_counts):
-        ax = axes[1, col]
-        df_subset = df[df["total_treatments"] == n_treatments]
+        ax = axes[2, col]
+        df_subset = df[
+            df["total_treatments"] == n_treatments
+        ]
 
         for (strategy, gamma), runs in df_subset.groupby(
             ["strategy", "gamma"]
@@ -529,9 +584,9 @@ def plot_combined_regret(df):
                 runs["true_utility_true_best"]
                 - runs["true_utility_treatment"]
             )
-            runs["regret"] = runs.groupby("run_id")["regret"].cumsum() / (
-                (runs["iteration"] + 1)
-            )
+            runs["regret"] = runs.groupby("run_id")[
+                "regret"
+            ].cumsum() / ((runs["iteration"] + 1))
 
             iterations = runs.groupby("iteration").agg(
                 regret=("regret", "mean")
@@ -561,16 +616,18 @@ def plot_combined_regret(df):
         if col == 0:
             ax.set_ylabel("Average regret")
 
-    # Bottom row: Exploitation probability
     for col, n_treatments in enumerate(treatment_counts):
-        ax = axes[2, col]
-        df_subset = df[df["total_treatments"] == n_treatments]
+        ax = axes[3, col]
+        df_subset = df[
+            df["total_treatments"] == n_treatments
+        ]
 
         for (strategy, gamma), runs in df_subset.groupby(
             ["strategy", "gamma"]
         ):
             runs["exploit"] = (
-                runs["selected_treatment"] == runs["current_best_treatment"]
+                runs["selected_treatment"]
+                == runs["current_best_treatment"]
             )
 
             iterations = runs.groupby("iteration").agg(
@@ -608,21 +665,30 @@ def plot_combined_regret(df):
         if col == 0:
             ax.set_ylabel("Exploitation probability")
 
-    # Legend handling
+    # Organize legend entries by desired grouping
     handles, labels = axes[0, 0].get_legend_handles_labels()
 
-    col1_entries = []
-    col2_entries = []
-    col3_entries = []
+    # Create organized lists for each column
+    col1_entries = []  # Even sampling and Greedy
+    col2_entries = []  # Active inference (all gamma values)
+    col3_entries = []  # Thompson and Exploration sampling
 
+    # Sort entries into appropriate columns
     for handle, label in zip(handles, labels):
-        if "even" in label.lower() or "greedy" in label.lower():
+        if (
+            "even" in label.lower()
+            or "greedy" in label.lower()
+        ):
             col1_entries.append((handle, label))
         elif "active inference" in label.lower():
             col2_entries.append((handle, label))
-        elif "thompson" in label.lower() or "exploration" in label.lower():
+        elif (
+            "thompson" in label.lower()
+            or "exploration" in label.lower()
+        ):
             col3_entries.append((handle, label))
 
+    # Combine in desired order: col1, then col2, then col3
     organized_handles = []
     organized_labels = []
 
@@ -633,7 +699,12 @@ def plot_combined_regret(df):
     organized_labels.append("")
     organized_handles.append(
         matplotlib.patches.Rectangle(
-            (0, 0), 1, 1, fill=False, edgecolor="none", visible=False
+            (0, 0),
+            1,
+            1,
+            fill=False,
+            edgecolor="none",
+            visible=False,
         )
     )
 
@@ -645,6 +716,7 @@ def plot_combined_regret(df):
         organized_handles.append(handle)
         organized_labels.append(label)
 
+    # Add legend with organized entries
     fig.legend(
         organized_handles,
         organized_labels,
@@ -654,8 +726,9 @@ def plot_combined_regret(df):
         frameon=False,
     )
 
+    # Adjust layout to prevent overlap
     plt.tight_layout()
-    plt.subplots_adjust(bottom=0.15)
+    plt.subplots_adjust(bottom=0.15)  # Make room for legend
     plt.savefig(
         "output/systematic_active_inference_simple.pdf",
         bbox_inches="tight",
