@@ -598,15 +598,60 @@ linestyles = {
 def plot_combined_regret(df):
     # Create figure with 2 rows, 3 columns
     fig, axes = plt.subplots(
-        3, 3, figsize=(12.5 * 0.7, 10 * 0.7), sharey="row"
+        4, 3, figsize=(12.5 * 0.7, 10 * 0.7 * 4/3), sharey="row"
     )
 
     # Treatment counts to plot
     treatment_counts = [5, 10, 30]
 
-    # Top row: Policy regret
     for col, n_treatments in enumerate(treatment_counts):
         ax = axes[0, col]
+        df_subset = df[
+            df["total_treatments"] == n_treatments
+        ]
+
+        for (strategy, gamma), runs in df_subset.groupby(
+            ["strategy", "gamma"]
+        ):
+            runs["correct"] = runs["current_best_treatment"] == runs["true_best_treatment"]
+            iterations = runs.groupby("iteration").agg(
+                correct=(
+                    "correct",
+                    "mean",
+                ),
+            )
+
+            strategy_label = strategy_labels[strategy]
+            label = (
+                strategy_label
+                if strategy != "active_inference"
+                else f"{strategy_label} ($\gamma={gamma:.1f}$)"
+            )
+
+            color = colors[strategy]
+            if strategy == "active_inference":
+                color += [0.3, 0.2, 0.1].index(gamma)
+
+            color = plt.cm.tab20c(color)
+
+            indices = np.arange(1, len(iterations), 10)
+            ax.plot(
+                indices,
+                iterations["correct"].values[indices],
+                label=label,
+                color=color,
+                ls=linestyles[strategy],
+            )
+
+        ax.set_ylim(0, 1)
+        ax.set_title(f"{n_treatments} treatments")
+        # ax.set_xlabel("Iteration")
+        if col == 0:
+            ax.set_ylabel("Best arm identification")
+
+    # Top row: Policy regret
+    for col, n_treatments in enumerate(treatment_counts):
+        ax = axes[1, col]
         df_subset = df[
             df["total_treatments"] == n_treatments
         ]
@@ -659,7 +704,7 @@ def plot_combined_regret(df):
 
     # Bottom row: Sample regret (cumulative)
     for col, n_treatments in enumerate(treatment_counts):
-        ax = axes[1, col]
+        ax = axes[2, col]
         df_subset = df[
             df["total_treatments"] == n_treatments
         ]
@@ -704,7 +749,7 @@ def plot_combined_regret(df):
             ax.set_ylabel("Average regret")
 
     for col, n_treatments in enumerate(treatment_counts):
-        ax = axes[2, col]
+        ax = axes[3, col]
         df_subset = df[
             df["total_treatments"] == n_treatments
         ]
