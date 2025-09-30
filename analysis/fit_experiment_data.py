@@ -189,6 +189,7 @@ def main():
             "output/KnowledgeTrial_deployment.csv", "optimal_test"
         )
     )
+    
     fit, stan_data = fit_irt_model(
         df,
         chains=4,
