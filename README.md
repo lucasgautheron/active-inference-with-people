@@ -28,11 +28,11 @@ In the first experiment, we apply active inference to infer participants' abilit
 few tests as possible.
 The optimal challenge to present to each participant is evaluated at every step by maximizing the expected information
 gain using variational inference methods for efficient computation.
-We achieve a 33% reduction in the tests administered with negligible information loss in a simulation based on real human data.
+We achieve a 30-40% reduction in the tests administered with negligible information loss in a simulation based on real human data from Dubourg et al., 2025.
 
-| Trials per participant throughout the experiment |  Accuracy of adaptive design versus the oracle (static) |
-|:------------------------------------------------:|:--------------------------------------------------------:|
-|      ![](output/trials_per_participant.png)      |  ![](output/theta_comparison.png)                       |
+|    Trials per participant throughout the experiment     |  Accuracy of adaptive design versus the oracle (static) |
+|:-------------------------------------------------------:|:--------------------------------------------------------:|
+| ![](output/trials_per_participant_bayes_deployment.png) |  ![](output/theta_comparison.png)                       |
 
 ## Experiment 2 
 
