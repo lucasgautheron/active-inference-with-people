@@ -13,9 +13,11 @@
 This experiment implements real-time adaptive testing using active inference in PsyNet.
 
 Active inference is a joint-theory of action and perception in biological systems with applications in machine learning.
-We show that it can also be used for optimizing an experimental setup in real-time.
+We show that it can also be used for optimizing an experimental setup in real-time. In this approach, the optimal designed
+is determined by maximizing the expected free energy G, which is roughly equal to the sum of the expected information gain (EIG)
+and the expected utility (U).
 
-In fact, for experiments with pure epistemic (i.e. information-seeking) goals, active inference is equivalent to
+In fact, for experiments with pure information-seeking goals (U=0), active inference is equivalent to
 Variational Bayesian Optimal Experimental Design.
 However, active inference can generalize Bayesian Optimal Design to cases in which experiments seek to achieve specific
 outcomes.
