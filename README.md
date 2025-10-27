@@ -1,4 +1,4 @@
-# Active inference for real-time adaptive testing with PsyNet
+# Active inference for real-time adaptive experiments with PsyNet
 
 <!-- TOC -->
 * [Experiment 1](#experiment-1-branch-main)
