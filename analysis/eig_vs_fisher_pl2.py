@@ -7,7 +7,15 @@ from concurrent.futures import (
 )
 from contextlib import ExitStack
 from dataclasses import dataclass
+from multiprocessing import get_context
 from pathlib import Path
+
+# Avoid nested BLAS/OpenMP thread pools inside parallel run
+# workers. Callers can override these environment variables.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("VECLIB_MAXIMUM_THREADS", "1")
 
 import matplotlib
 import numpy as np
@@ -24,6 +32,7 @@ from tqdm import tqdm
 
 matplotlib.use("pdf")
 DEFAULT_OUTPUT_DIR = Path("output/eig_vs_fisher_pl2")
+DEFAULT_MAX_RUN_WORKERS = 4
 
 
 def output_dir(args):
@@ -704,6 +713,9 @@ def simulate_run(run_id, args):
 
 
 def write_run_outputs(run_id, args, run_output_dir):
+    torch.set_num_threads(args.torch_threads)
+    print(f"Starting run {run_id}", flush=True)
+
     oracle, eig, fisher = simulate_run(run_id, args)
     outputs = dict(
         zip(
@@ -727,7 +739,11 @@ def run_simulations(run_ids, args, run_output_dir):
 
     max_workers = args.run_workers
     if max_workers is None:
-        max_workers = min(len(run_ids), os.cpu_count() or 1)
+        max_workers = min(
+            len(run_ids),
+            os.cpu_count() or 1,
+            DEFAULT_MAX_RUN_WORKERS,
+        )
 
     if max_workers == 1:
         for run_id in run_ids:
@@ -739,7 +755,8 @@ def run_simulations(run_ids, args, run_output_dir):
         return
 
     with ProcessPoolExecutor(
-        max_workers=max_workers
+        max_workers=max_workers,
+        mp_context=get_context("spawn"),
     ) as executor:
         futures = {
             executor.submit(
@@ -1228,7 +1245,17 @@ def parse_args():
         default=None,
         help=(
             "Number of runs to execute in parallel. Defaults to "
-            "min(n-runs, CPU count). Use 1 for sequential execution."
+            "min(n-runs, CPU count, 4). Use 1 for sequential "
+            "execution."
+        ),
+    )
+    parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=1,
+        help=(
+            "Torch intra-op threads per run worker. Keep this low "
+            "when running many runs in parallel."
         ),
     )
     parser.add_argument("--seed", type=int, default=123)
@@ -1299,6 +1326,10 @@ def main():
         and args.run_workers < 1
     ):
         raise ValueError("--run-workers must be at least 1")
+    if args.torch_threads < 1:
+        raise ValueError(
+            "--torch-threads must be at least 1"
+        )
 
     if args.plot:
         plot_hmc_rmse(args)
