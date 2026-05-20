@@ -5,6 +5,7 @@ from concurrent.futures import (
     ProcessPoolExecutor,
     as_completed,
 )
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,20 +15,6 @@ import pandas as pd
 import pyro
 import pyro.distributions as dist
 import torch
-from eig_vs_fisher import (
-    condition_dirs,
-    hmc_estimates_path,
-    hmc_squared_errors,
-    next_run_ids,
-    oracle_lookup,
-    output_dir,
-    output_specs,
-    plate_stack,
-    response_paths,
-    rmse_summary,
-    run_id_from_path,
-    scenario_from_path,
-)
 from pyro.contrib.oed.eig import marginal_eig
 from pyro.infer import SVI, Trace_ELBO
 from pyro.optim import Adam
@@ -37,6 +24,30 @@ from tqdm import tqdm
 
 matplotlib.use("pdf")
 DEFAULT_OUTPUT_DIR = Path("output/eig_vs_fisher_pl2")
+
+
+def output_dir(args):
+    return args.output_dir / f"{args.items}_{args.trials}"
+
+
+def plate_stack(name, sizes):
+    stack = ExitStack()
+    for index, size in enumerate(reversed(sizes), start=1):
+        stack.enter_context(
+            pyro.plate(
+                f"{name}_{index}",
+                size,
+                dim=-index,
+            )
+        )
+    return stack
+
+
+def oracle_lookup(oracle):
+    return {
+        (row["participant_id"], row["item_id"]): row
+        for row in oracle.to_dict(orient="records")
+    }
 
 
 @dataclass
@@ -747,6 +758,117 @@ def run_simulations(run_ids, args, run_output_dir):
                 print(f"Wrote {row_count} rows to {path}")
 
 
+def output_specs(run_id):
+    return [
+        (
+            "oracle",
+            f"responses_oracle_run_{run_id:03d}.csv",
+        ),
+        ("eig", f"responses_eig_run_{run_id:03d}.csv"),
+        (
+            "pointwise_fisher",
+            f"responses_pointwise_fisher_run_{run_id:03d}.csv",
+        ),
+    ]
+
+
+def complete_run_exists(run_output_dir, run_id):
+    return all(
+        (run_output_dir / filename).exists()
+        for _, filename in output_specs(run_id)
+    )
+
+
+def next_run_ids(run_output_dir, n_runs):
+    run_ids = []
+    candidate = 0
+    while len(run_ids) < n_runs:
+        if complete_run_exists(run_output_dir, candidate):
+            print(f"Skipping existing run {candidate}")
+        else:
+            run_ids.append(candidate)
+        candidate += 1
+
+    return run_ids
+
+
+def run_id_from_path(path):
+    return int(path.stem.rsplit("_", maxsplit=1)[-1])
+
+
+def remove_prefix(value, prefix):
+    if value.startswith(prefix):
+        return value[len(prefix) :]
+
+    return value
+
+
+def scenario_from_path(path):
+    return remove_prefix(path.stem, "responses_").rsplit(
+        "_run_",
+        maxsplit=1,
+    )[0]
+
+
+def hmc_estimates_path(run_output_dir):
+    return run_output_dir / "hmc_parameter_estimates.csv"
+
+
+def response_paths(run_output_dir):
+    return sorted(
+        list(
+            run_output_dir.glob(
+                "responses_oracle_run_*.csv"
+            )
+        )
+        + list(
+            run_output_dir.glob("responses_eig_run_*.csv")
+        )
+        + list(
+            run_output_dir.glob(
+                "responses_pointwise_fisher_run_*.csv"
+            )
+        )
+    )
+
+
+def parse_condition_dir(path):
+    parts = path.name.split("_")
+    if len(parts) != 2:
+        return None
+
+    try:
+        return {
+            "items": int(parts[0]),
+            "trials": int(parts[1]),
+        }
+    except ValueError:
+        return None
+
+
+def condition_dirs(args):
+    dirs = []
+    if args.output_dir.exists():
+        for path in sorted(args.output_dir.iterdir()):
+            if not path.is_dir():
+                continue
+            condition = parse_condition_dir(path)
+            if condition is None or not response_paths(
+                path
+            ):
+                continue
+            dirs.append((path, condition))
+
+    # Keep plot mode useful when the caller points directly at one
+    # simulation folder rather than the experiment root.
+    direct_condition = parse_condition_dir(args.output_dir)
+    if not dirs and direct_condition is not None:
+        if response_paths(args.output_dir):
+            dirs.append((args.output_dir, direct_condition))
+
+    return dirs
+
+
 def fit_pl2_hmc(
     df,
     draws,
@@ -922,6 +1044,72 @@ def compute_hmc_estimates(run_output_dir, args):
     estimates = pd.concat(rows, ignore_index=True)
     estimates.to_csv(cache_path, index=False)
     return estimates
+
+
+def hmc_squared_errors(estimates):
+    oracle = estimates[
+        estimates["scenario"] == "oracle"
+    ].rename(columns={"estimate": "oracle_estimate"})
+    scenario_estimates = estimates[
+        estimates["scenario"].isin(
+            ["eig", "pointwise_fisher"]
+        )
+    ].rename(columns={"estimate": "scenario_estimate"})
+
+    merged = scenario_estimates.merge(
+        oracle[
+            [
+                "run_id",
+                "parameter",
+                "parameter_id",
+                "oracle_estimate",
+            ]
+        ],
+        on=["run_id", "parameter", "parameter_id"],
+        how="inner",
+    )
+
+    merged["error"] = (
+        merged["scenario_estimate"]
+        - merged["oracle_estimate"]
+    )
+    merged["squared_error"] = merged["error"] ** 2
+
+    return merged[
+        [
+            "run_id",
+            "scenario",
+            "parameter",
+            "parameter_id",
+            "scenario_estimate",
+            "oracle_estimate",
+            "error",
+            "squared_error",
+        ]
+    ]
+
+
+def rmse_summary(errors):
+    summary = (
+        errors.groupby(
+            ["items", "trials", "scenario", "parameter"],
+            as_index=False,
+        )
+        .agg(
+            mse=("squared_error", "mean"),
+            sem_mse=("squared_error", "sem"),
+            n_estimates=("squared_error", "size"),
+        )
+        .fillna({"sem_mse": 0.0})
+    )
+    summary["mean_rmse"] = np.sqrt(summary["mse"])
+    summary["sem_rmse"] = np.where(
+        summary["mean_rmse"] > 0,
+        summary["sem_mse"] / (2 * summary["mean_rmse"]),
+        0.0,
+    )
+
+    return summary
 
 
 def plot_hmc_rmse(args):
