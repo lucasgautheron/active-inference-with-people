@@ -1170,7 +1170,7 @@ def plot_hmc_rmse(args):
 
     labels = {
         "eig": "EIG",
-        "pointwise_fisher": "Pointwise Fisher",
+        "pointwise_fisher": "Fisher information",
     }
     fig, axes = plt.subplots(1, 3, figsize=(9.2, 2.6))
     multiple_trial_counts = summary["trials"].nunique() > 1
@@ -1208,7 +1208,7 @@ def plot_hmc_rmse(args):
                 )
 
         ax.set_title(title)
-        ax.set_xlabel("Number of treatments")
+        ax.set_xlabel("Number of items")
         ax.set_ylabel("RMSE vs oracle HMC")
         ax.set_xticks(
             sorted(parameter_scores["items"].unique())
