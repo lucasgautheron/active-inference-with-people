@@ -1,6 +1,10 @@
 # pylint: disable=unused-import,abstract-method
 
 import logging
+import os
+import random
+import time
+import json
 
 from markupsafe import Markup
 
@@ -23,27 +27,34 @@ from psynet.demography.general import (
 from psynet.utils import log_time_taken
 
 from dallinger import db
-import time
 
 import torch
 import pyro
 import pyro.distributions as dist
 import numpy as np
-from torch.distributions.constraints import positive
 from pyro.contrib.oed.eig import marginal_eig
 from pyro.infer import SVI, Trace_ELBO
+from pyro.infer.autoguide import AutoNormal
+from pyro.infer.autoguide.initialization import init_to_mean
 from pyro.optim import Adam
-
-from scipy.stats import norm, beta as beta_dist
+from scipy.special import digamma
+from scipy.stats import norm
 
 import pandas as pd
-import csv
-import json
 
 DEBUG_MODE = True
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 30 * 20  # in seconds
+JOURNAL_EXPERIMENT = os.environ.get("JOURNAL_EXPERIMENT", "both")
+AIF_NUM_STEPS = int(os.environ.get("AIF_NUM_STEPS", "400"))
+AIF_NUM_SAMPLES = int(os.environ.get("AIF_NUM_SAMPLES", "400"))
+AIF_FINAL_SAMPLES = int(os.environ.get("AIF_FINAL_SAMPLES", "10000"))
+AIF_EPSILON = float(os.environ.get("AIF_EPSILON", "0.04"))
+TEST_N_BOTS = int(os.environ.get("TEST_N_BOTS", "200"))
+DEBUG_PLOTS = os.environ.get("DEBUG_PLOTS", "") == "1"
+
+assert JOURNAL_EXPERIMENT in ["both", "treatment", "testing"]
 
 assert SETUP in ["adaptive", "oracle"]
 assert RECRUITER in ["hotair", "prolific", "cap-recruiter"]
@@ -61,18 +72,30 @@ class Oracle:
     """
 
     def __init__(self, domains):
-        answers = pd.read_csv("output/KnowledgeTrial_oracle_treatment.csv")
+        answers = pd.read_csv(
+            "output/KnowledgeTrial_oracle_treatment.csv"
+        )
         answers["domain"] = (answers["node_id"] - 1) // 15
         answers = answers[answers["domain"].isin(domains)]
 
         logger.info(answers["answer"])
 
-        participants = pd.read_csv("output/Participant_oracle_treatment.csv")
-        participants = participants[participants["progress"] == 1]
+        participants = pd.read_csv(
+            "output/Participant_oracle_treatment.csv"
+        )
+        participants = participants[
+            participants["progress"] == 1
+        ]
         participants.reset_index(inplace=True)
-        participants["new_participant_id"] = participants.index.values + 1
+        participants["new_participant_id"] = (
+            participants.index.values + 1
+        )
 
-        logger.info(participants[participants["new_participant_id"] == 103])
+        logger.info(
+            participants[
+                participants["new_participant_id"] == 103
+            ]
+        )
 
         answers = answers.merge(
             participants[["id", "new_participant_id"]],
@@ -81,16 +104,25 @@ class Oracle:
             right_on="id",
         )
 
-        logger.info(answers[answers["new_participant_id"] == 103])
+        logger.info(
+            answers[answers["new_participant_id"] == 103]
+        )
 
         answers["answer"].fillna("", inplace=True)
         self.answers = {
-            (answer["new_participant_id"], answer["question"]): answer["answer"]
+            (
+                answer["new_participant_id"],
+                answer["question"],
+            ): answer["answer"]
             for answer in answers.to_dict(orient="records")
         }
         self.education = {
-            participant["new_participant_id"]: participant["z"]
-            for participant in participants.to_dict(orient="records")
+            participant["new_participant_id"]: participant[
+                "z"
+            ]
+            for participant in participants.to_dict(
+                orient="records"
+            )
         }
 
         logger.info("Oracle data:")
@@ -103,22 +135,102 @@ class Oracle:
         return self.education[participant_id]
 
 
-oracle = Oracle(domains=[0, 1])
+_oracle = None
+
+
+def get_oracle():
+    global _oracle
+    if _oracle is None:
+        _oracle = Oracle(domains=[0, 1])
+    return _oracle
+
+
+def beta_bernoulli_eig(alpha, beta):
+    """Exact EIG for a Bernoulli likelihood with a Beta posterior."""
+    alpha = np.asarray(alpha, dtype=float)
+    beta = np.asarray(beta, dtype=float)
+    n = alpha + beta
+    mu = alpha / n
+    predictive_entropy = -mu * np.log(mu) - (
+        1 - mu
+    ) * np.log1p(-mu)
+    expected_conditional_entropy = (
+        digamma(n + 1)
+        - mu * digamma(alpha + 1)
+        - (1 - mu) * digamma(beta + 1)
+    )
+    return predictive_entropy - expected_conditional_entropy
 
 
 class OptimalDesign:
-    def __init__(self):
-        pass
+    """Active inference loop shared by every optimizer."""
 
-    def get_optimal_node(self, candidates, participant, data):
+    def update_posterior(self, data):
+        return None
+
+    def expected_information_gain(
+        self, candidates, participant, data
+    ):
         raise NotImplementedError()
+
+    def expected_utility(
+        self, candidates, participant, data
+    ):
+        return {d: 0.0 for d in candidates}
+
+    def predictive_outcome(
+        self, candidates, participant, data
+    ):
+        return {d: 0.5 for d in candidates}
+
+    def should_stop(self, eig):
+        return False
+
+    def get_optimal_node(
+        self, candidates, participant, data
+    ):
+        self.update_posterior(data)
+        eig = self.expected_information_gain(
+            candidates, participant, data
+        )
+        utility = self.expected_utility(
+            candidates, participant, data
+        )
+        if self.should_stop(eig):
+            logger.info("Early stopping")
+            return None, None
+
+        scores = {
+            d: eig[d] + utility[d] for d in candidates
+        }
+        maximum = max(scores.values())
+        ties = [
+            d
+            for d in candidates
+            if abs(scores[d] - maximum) < 1e-5
+        ]
+        d_hat = random.choice(ties)
+        p_y = self.predictive_outcome(
+            candidates, participant, data
+        )[d_hat]
+        return d_hat, {0: 1.0 - p_y, 1: float(p_y)}
 
 
 class AdaptiveTesting(OptimalDesign):
-    def __init__(self):
+    def __init__(
+        self,
+        num_steps=AIF_NUM_STEPS,
+        num_samples=AIF_NUM_SAMPLES,
+        final_num_samples=AIF_FINAL_SAMPLES,
+        epsilon=AIF_EPSILON,
+        svi_lr=0.02,
+        start_lr=0.1,
+        end_lr=0.001,
+    ):
         logger.debug("Initializing adaptive learner.")
 
-        # Priors parameters
+        # Independent sites so AutoNormal matches the prior family.
+        # logit = θ − δ + b implements the paper 1PL δ ~ N(b, 1).
         self.prior_mean_theta = torch.tensor(0.0)
         self.prior_sd_theta = torch.tensor(2.0)
         self.prior_mean_difficulty = torch.tensor(0.0)
@@ -131,29 +243,70 @@ class AdaptiveTesting(OptimalDesign):
         self.difficulty_means = torch.empty(0)
         self.difficulty_sds = torch.empty(0)
         self.intercept_mean = torch.tensor(0.0)
-        self.intercept_sd = torch.tensor(0.0)
+        self.intercept_sd = torch.tensor(1.0)
 
-        # EIG computation parameters
-        self.num_steps = 400
-        self.start_lr = 0.1
-        self.end_lr = 0.001
+        self.num_steps = num_steps
+        self.num_samples = num_samples
+        self.final_num_samples = final_num_samples
+        self.epsilon = epsilon
+        self.svi_lr = svi_lr
+        self.start_lr = start_lr
+        self.end_lr = end_lr
+        self._p_y = {}
+
+    def _model(self, participants, items):
+        """(1) Observation model: 1PL item-response model."""
+        thetas = pyro.sample(
+            "thetas",
+            dist.Normal(
+                self.prior_mean_theta,
+                self.prior_sd_theta,
+            )
+            .expand([self.num_participants])
+            .to_event(1),
+        )
+        difficulties = pyro.sample(
+            "difficulties",
+            dist.Normal(
+                self.prior_mean_difficulty,
+                self.prior_sd_difficulty,
+            )
+            .expand([self.num_items])
+            .to_event(1),
+        )
+        intercept = pyro.sample(
+            "intercept",
+            dist.Normal(
+                self.prior_mean_intercept,
+                self.prior_sd_intercept,
+            ),
+        )
+        logit_p = (
+            thetas[participants.long()]
+            - difficulties[items.long()]
+            + intercept
+        )
+        pyro.sample(
+            "y",
+            dist.Bernoulli(logits=logit_p).to_event(1),
+        )
 
     def _make_design_model(self, target_participant):
-        """Create a model for a specific participant
-        that takes item indices as design"""
+        """(2) Simulation model for a candidate item."""
 
         def model(design):
-            with pyro.plate_stack("plate", design.shape[:-1]):
-                # Sample ability parameter for the target participant
+            with pyro.plate_stack(
+                "plate", design.shape[:-1]
+            ):
                 theta = pyro.sample(
                     "theta",
                     dist.Normal(
-                        self.theta_means[target_participant],
+                        self.theta_means[
+                            target_participant
+                        ],
                         self.theta_sds[target_participant],
                     ),
-                )
-                theta = theta.unsqueeze(-1)
-
+                ).unsqueeze(-1)
                 item_idx = design.squeeze(-1).long()
                 difficulties = pyro.sample(
                     "difficulties",
@@ -162,7 +315,6 @@ class AdaptiveTesting(OptimalDesign):
                         self.difficulty_sds[item_idx],
                     ),
                 ).unsqueeze(-1)
-
                 intercept = pyro.sample(
                     "intercept",
                     dist.Normal(
@@ -170,139 +322,15 @@ class AdaptiveTesting(OptimalDesign):
                         self.intercept_sd,
                     ),
                 ).unsqueeze(-1)
-                logit_p = (theta - difficulties) + intercept
-
-                y = pyro.sample(
+                pyro.sample(
                     "y",
                     dist.Bernoulli(
-                        logits=logit_p,
+                        logits=(theta - difficulties)
+                        + intercept
                     ).to_event(1),
                 )
 
-                return y
-
         return model
-
-    def _model(self, participants, items):
-        """Model of the data-generating process"""
-        # Sample ability parameters
-        # for all participants: theta_i ~ N(0, 2)
-        thetas = pyro.sample(
-            "thetas",
-            dist.Normal(
-                self.prior_mean_theta,
-                self.prior_sd_theta,
-            )
-            .expand(
-                [self.num_participants],
-            )
-            .to_event(1),
-        )
-
-        # Sample difficulty parameters
-        # for all potential items
-        difficulties = pyro.sample(
-            "difficulties",
-            dist.Normal(
-                self.prior_mean_difficulty,
-                self.prior_sd_difficulty,
-            )
-            .expand(
-                [self.num_items],
-            )
-            .to_event(1),
-        )
-
-        # Sample intercept parameter
-        intercept = pyro.sample(
-            "intercept",
-            dist.Normal(
-                self.prior_mean_intercept,
-                self.prior_sd_intercept,
-            ),
-        )
-
-        selected_thetas = thetas[participants.long()]
-        selected_difficulties = difficulties[items.long()]
-
-        # Logistic regression model with intercept
-        logit_p = (selected_thetas - selected_difficulties) + intercept
-        y = pyro.sample(
-            "y",
-            dist.Bernoulli(
-                logits=logit_p,
-            ).to_event(1),
-        )
-        return y
-
-    def _guide(self, participants, items):
-        """Guide for multiple participants
-        with hierarchical theta structure"""
-
-        # Guide for thetas
-        # (means and sds)
-        theta_means = pyro.param(
-            "theta_means",
-            torch.full(
-                [self.num_participants],
-                self.prior_mean_theta,
-            ),
-        )
-        theta_sds = pyro.param(
-            "theta_sds",
-            torch.full(
-                [self.num_participants],
-                self.prior_sd_theta,
-            ),
-            constraint=positive,
-        )
-        pyro.sample(
-            "thetas",
-            dist.Normal(
-                theta_means,
-                theta_sds,
-            ).to_event(1),
-        )
-
-        # Guide for difficulties
-        mean_difficulties = pyro.param(
-            "mean_difficulties",
-            self.prior_mean_difficulty.expand(
-                [self.num_items],
-            ).clone(),
-        )
-        sd_difficulties = pyro.param(
-            "sd_difficulties",
-            self.prior_sd_difficulty.expand(
-                [self.num_items],
-            ).clone(),
-            constraint=positive,
-        )
-        pyro.sample(
-            "difficulties",
-            dist.Normal(
-                mean_difficulties,
-                sd_difficulties,
-            ).to_event(1),
-        )
-
-        # Guide for intercept
-        mean_intercept = pyro.param(
-            "mean_intercept",
-            self.prior_mean_intercept.clone(),
-        )
-        sd_intercept = pyro.param(
-            "sd_intercept",
-            self.prior_sd_intercept.clone(),
-            constraint=positive,
-        )
-        pyro.sample(
-            "intercept",
-            dist.Normal(
-                mean_intercept,
-                sd_intercept,
-            ),
-        )
 
     def _marginal_guide(
         self,
@@ -310,110 +338,111 @@ class AdaptiveTesting(OptimalDesign):
         observation_labels,
         target_labels,
     ):
-        """Guide for marginal_eig"""
         q_logit = pyro.param(
             "q_logit",
             torch.zeros(design.shape[-2:]),
         )
         pyro.sample(
             "y",
-            dist.Bernoulli(logits=q_logit).to_event(
-                1,
-            ),
+            dist.Bernoulli(logits=q_logit).to_event(1),
         )
 
     def init_parameters(self, num_participants, num_items):
         self.num_participants = num_participants
         self.num_items = num_items
-
-        self.theta_means = torch.full([num_participants], self.prior_mean_theta)
-        self.theta_sds = torch.full([num_participants], self.prior_sd_theta)
+        self.theta_means = torch.full(
+            [num_participants], self.prior_mean_theta
+        )
+        self.theta_sds = torch.full(
+            [num_participants], self.prior_sd_theta
+        )
         self.difficulty_means = torch.full(
             [num_items], self.prior_mean_difficulty
         )
-        self.difficulty_sds = torch.full([num_items], self.prior_sd_difficulty)
-        self.intercept_mean = torch.tensor(self.prior_mean_intercept)
-        self.intercept_sd = torch.tensor(self.prior_sd_intercept)
+        self.difficulty_sds = torch.full(
+            [num_items], self.prior_sd_difficulty
+        )
+        self.intercept_mean = self.prior_mean_intercept.clone()
+        self.intercept_sd = self.prior_sd_intercept.clone()
+
+    def _loc_scale(self, name):
+        loc, scale = self.guide._get_loc_and_scale(name)
+        return loc.detach().clone(), scale.detach().clone()
 
     def update_posterior(self, data):
-        """Update posterior beliefs based on all collected experimental data"""
-
-        participants = []
-        items = []
-        responses = []
-
-        for node_id, trials in data["nodes"].items():
-            for trial_id, trial_data in trials.items():
-                participants.append(trial_data["participant_id"])
-                items.append(node_id)
-                responses.append(float(trial_data["y"]))
-
+        """(3) Mean-field Gaussian posterior via AutoNormal."""
         self.participant_index = {
-            participant: idx
-            for idx, participant in enumerate(data["participants"])
+            pid: i
+            for i, pid in enumerate(data["participants"])
         }
         self.item_index = {
-            item: idx for idx, item in enumerate(data["nodes"].keys())
+            iid: i for i, iid in enumerate(data["items"])
         }
-
-        participants = torch.tensor(
-            [
-                self.participant_index[participant]
-                for participant in participants
-            ],
-            dtype=torch.long,
-        )
-        items = torch.tensor(
-            [self.item_index[item] for item in items], dtype=torch.long
-        )
-        responses = torch.tensor(responses)
-
-        # Initialize parameters with correct sizes
         self.init_parameters(
             len(self.participant_index),
             len(self.item_index),
         )
 
-        pyro.clear_param_store()
-
-        # The statistical model conditioned on all prior responses
-        conditioned_model = pyro.condition(self._model, {"y": responses})
-
-        # Instantiate the stochastic variational inference
-        svi = SVI(
-            conditioned_model,
-            self._guide,
-            Adam({"lr": 0.02}),
-            loss=Trace_ELBO(),
+        participant_idx = torch.tensor(
+            [
+                self.participant_index[obs["participant_id"]]
+                for obs in data["y"].values()
+            ],
+            dtype=torch.long,
+        )
+        item_idx = torch.tensor(
+            [
+                self.item_index[obs["item_id"]]
+                for obs in data["y"].values()
+            ],
+            dtype=torch.long,
+        )
+        responses = torch.tensor(
+            [float(obs["value"]) for obs in data["y"].values()],
+            dtype=torch.float,
         )
 
-        # Fit the model
+        pyro.clear_param_store()
+        conditioned_model = pyro.condition(
+            self._model, {"y": responses}
+        )
+        self.guide = AutoNormal(
+            conditioned_model,
+            init_loc_fn=init_to_mean,
+            init_scale=1.0,
+        )
+        svi = SVI(
+            conditioned_model,
+            self.guide,
+            Adam({"lr": self.svi_lr}),
+            loss=Trace_ELBO(),
+        )
         for i in range(self.num_steps):
-            elbo = svi.step(participants, items)
+            elbo = svi.step(participant_idx, item_idx)
             if i % 100 == 0:
-                logger.info(f"  Iteration {i}, ELBO: {elbo:.3f}")
+                logger.info(
+                    f"  Iteration {i}, ELBO: {elbo:.3f}"
+                )
 
-        # Extract parameters
-        self.theta_means = pyro.param("theta_means").detach().clone()
-        self.theta_sds = pyro.param("theta_sds").detach().clone()
-        self.difficulty_means = pyro.param("mean_difficulties").detach().clone()
-        self.difficulty_sds = pyro.param("sd_difficulties").detach().clone()
-        self.intercept_mean = pyro.param("mean_intercept").detach().clone()
-        self.intercept_sd = pyro.param("sd_intercept").detach().clone()
-
+        self.theta_means, self.theta_sds = self._loc_scale(
+            "thetas"
+        )
+        (
+            self.difficulty_means,
+            self.difficulty_sds,
+        ) = self._loc_scale("difficulties")
+        self.intercept_mean, self.intercept_sd = (
+            self._loc_scale("intercept")
+        )
         logger.debug("Posterior update completed")
 
-    def get_optimal_node(self, candidates, participant, data):
-        # Update posterior with current data
-        self.update_posterior(data)
-
-        # Create design model for this participant
+    def expected_information_gain(
+        self, candidates, participant, data
+    ):
         pyro.clear_param_store()
         design_model = self._make_design_model(
             self.participant_index[participant.id]
         )
-
-        # Candidate designs
         candidate_designs = torch.tensor(
             [self.item_index[item] for item in candidates],
             dtype=torch.float,
@@ -423,110 +452,191 @@ class AdaptiveTesting(OptimalDesign):
             {
                 "optimizer": torch.optim.Adam,
                 "optim_args": {"lr": self.start_lr},
-                "gamma": (self.end_lr / self.start_lr) ** (1 / self.num_steps),
+                "gamma": (self.end_lr / self.start_lr)
+                ** (1 / max(self.num_steps, 1)),
             }
         )
-
-        # Compute Expected Information Gain for each candidate item
         eig = marginal_eig(
             design_model,
             candidate_designs,
             "y",
             ["theta", "difficulties", "intercept"],
-            num_samples=100,
+            num_samples=self.num_samples,
             num_steps=self.num_steps,
             guide=self._marginal_guide,
             optim=optimizer,
-            final_num_samples=10000,
+            final_num_samples=self.final_num_samples,
+        )
+        p_y = (
+            torch.special.expit(pyro.param("q_logit"))
+            .detach()
+            .reshape(-1)
+            .numpy()
+        )
+        eig_np = eig.detach().reshape(-1).numpy()
+        self._p_y = {
+            candidate: float(p_y[idx])
+            for idx, candidate in enumerate(candidates)
+        }
+        eig_dict = {
+            candidate: float(eig_np[idx])
+            for idx, candidate in enumerate(candidates)
+        }
+
+        logger.info(
+            "EIG max=%.4f epsilon=%.4f"
+            % (max(eig_dict.values()), self.epsilon)
         )
 
-        # Retrieve the posterior predictive probability for each design
-        p_y = torch.special.expit(pyro.param("q_logit")).detach().numpy()
-        p_outcome = dict()
-        for idx, candidate in enumerate(candidates):
-            p_outcome[candidate] = float(p_y[idx])
-
-        # Find the item with maximum EIG
-        best_idx = torch.argmax(eig)
-        optimal_test = candidates[best_idx]
-        best_eig = eig.detach().max()
-
-        # Apply the early-stopping criterion
-        epsilon = 0.04
-        if best_eig < epsilon:
-            logger.info("Early stopping")
-            return None, None
-
-        if DEBUG_MODE == True:
-            from matplotlib import pyplot as plt
-
-            entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(1 - p_y)
-
-            x = np.linspace(-3, +3, 200)
-            y = norm.pdf(
-                x,
-                loc=self.theta_means[self.participant_index[participant.id]],
-                scale=self.theta_sds[self.participant_index[participant.id]],
+        if DEBUG_PLOTS:
+            self._debug_plot(
+                candidates, participant, eig_np, p_y
             )
 
-            plt.plot(x, y, color="black", label=r"$\theta$(participant)")
+        return eig_dict
 
-            eig = eig.detach().numpy()
+    def predictive_outcome(
+        self, candidates, participant, data
+    ):
+        return self._p_y
 
-            cmap = plt.get_cmap("tab10")
-            for i in range(len(candidates)):
-                item = candidates[i]
-                color = cmap(i % 10)
-                y = norm.pdf(
+    def should_stop(self, eig):
+        """(4) Stop when max EIG falls below epsilon."""
+        return max(eig.values()) < self.epsilon
+
+    def _debug_plot(
+        self, candidates, participant, eig, p_y
+    ):
+        from matplotlib import pyplot as plt
+
+        entropy = -p_y * np.log2(p_y) - (1 - p_y) * np.log2(
+            1 - p_y
+        )
+        x = np.linspace(-3, +3, 200)
+        idx = self.participant_index[participant.id]
+        plt.plot(
+            x,
+            norm.pdf(
+                x,
+                loc=self.theta_means[idx],
+                scale=self.theta_sds[idx],
+            ),
+            color="black",
+            label=r"$\theta$(participant)",
+        )
+        cmap = plt.get_cmap("tab10")
+        for i, item in enumerate(candidates):
+            color = cmap(i % 10)
+            item_i = self.item_index[item]
+            plt.plot(
+                x,
+                norm.pdf(
                     x,
-                    loc=self.difficulty_means[self.item_index[item]]
+                    loc=self.difficulty_means[item_i]
                     - self.intercept_mean,
                     scale=np.sqrt(
-                        self.difficulty_sds[self.item_index[item]] ** 2
-                        + self.intercept_sd**2,
+                        self.difficulty_sds[item_i] ** 2
+                        + self.intercept_sd**2
                     ),
-                )
-                plt.plot(
-                    x,
-                    y,
-                    alpha=0.2,
-                    color=color,
-                )
-                plt.scatter(
-                    [
-                        self.difficulty_means[self.item_index[item]]
-                        - self.intercept_mean,
-                    ],
-                    [eig[i]],
-                    facecolors="none",
-                    edgecolors=color,
-                    marker="s",
-                    label="EIG" if i == 0 else None,
-                )
-
-                plt.scatter(
-                    [
-                        self.difficulty_means[self.item_index[item]]
-                        - self.intercept_mean,
-                    ],
-                    [entropy[i]],
-                    color=color,
-                    label="$H(y)$" if i == 0 else None,
-                )
-
-            plt.axhline(epsilon, label=r"$\varepsilon$")
-            plt.xlim(-3, 3)
-            plt.ylim(0, 1)
-
-            plt.legend()
-            plt.savefig(
-                "output/test_{}.png".format(participant.id),
+                ),
+                alpha=0.2,
+                color=color,
             )
-            plt.clf()
+            plt.scatter(
+                [
+                    self.difficulty_means[item_i]
+                    - self.intercept_mean
+                ],
+                [eig[i]],
+                facecolors="none",
+                edgecolors=color,
+                marker="s",
+                label="EIG" if i == 0 else None,
+            )
+            plt.scatter(
+                [
+                    self.difficulty_means[item_i]
+                    - self.intercept_mean
+                ],
+                [entropy[i]],
+                color=color,
+                label="$H(y)$" if i == 0 else None,
+            )
+        plt.axhline(self.epsilon, label=r"$\varepsilon$")
+        plt.xlim(-3, 3)
+        plt.ylim(0, 1)
+        plt.legend()
+        plt.savefig(f"output/test_{participant.id}.png")
+        plt.clf()
 
-        return optimal_test, {
-            0: 1 - p_outcome[optimal_test],
-            1: p_outcome[optimal_test],
+
+class AdaptiveTreatment(OptimalDesign):
+    def __init__(self, gamma=0.1):
+        self.gamma = gamma
+        self.alpha = {}
+        self.beta = {}
+
+    def update_posterior(self, data):
+        """Exact Beta posterior by conjugacy."""
+        self.alpha = {
+            item: np.ones(2) for item in data["items"]
+        }
+        self.beta = {
+            item: np.ones(2) for item in data["items"]
+        }
+        for obs in data["y"].values():
+            z = data["participants"][obs["participant_id"]][
+                "z"
+            ]
+            if z is None:
+                continue
+            z = int(z)
+            item = obs["item_id"]
+            if obs["value"]:
+                self.alpha[item][z] += 1
+            else:
+                self.beta[item][z] += 1
+
+    def expected_information_gain(
+        self, candidates, participant, data
+    ):
+        z_i = int(participant.var.z)
+        return {
+            d: float(
+                beta_bernoulli_eig(
+                    self.alpha[d][z_i], self.beta[d][z_i]
+                )
+            )
+            for d in candidates
+        }
+
+    def expected_utility(
+        self, candidates, participant, data
+    ):
+        """(5) U(d) = γ (μ_{d,1} − μ_{d,0}), p(z)=1/2."""
+        return {
+            d: float(
+                self.gamma
+                * (
+                    self.alpha[d][1]
+                    / (self.alpha[d][1] + self.beta[d][1])
+                    - self.alpha[d][0]
+                    / (self.alpha[d][0] + self.beta[d][0])
+                )
+            )
+            for d in candidates
+        }
+
+    def predictive_outcome(
+        self, candidates, participant, data
+    ):
+        z_i = int(participant.var.z)
+        return {
+            d: float(
+                self.alpha[d][z_i]
+                / (self.alpha[d][z_i] + self.beta[d][z_i])
+            )
+            for d in candidates
         }
 
 
@@ -576,7 +686,7 @@ class KnowledgeTrial(StaticTrial):
             ),
             TextControl(
                 block_copy_paste=True,
-                bot_response=lambda: oracle.answer(
+                bot_response=lambda: get_oracle().answer(
                     participant.id,
                     question,
                 ),
@@ -656,15 +766,19 @@ class KnowledgeTrialMaker(StaticTrialMaker):
 
     @log_time_taken
     def prior_data(self, experiment):
-        data = {"nodes": dict(), "participants": dict()}
+        data = {
+            "participants": dict(),
+            "items": dict(),
+            "y": dict(),
+        }
 
-        # List participants involved in this trial maker
         start = time.time()
         participants = (
             db.session.query(Participant)
             .join(Participant._module_states)
             .filter(
-                ModuleState.module_id == self.id, ModuleState.started == True
+                ModuleState.module_id == self.id,
+                ModuleState.started == True,
             )
             .distinct()
             .all()
@@ -680,17 +794,18 @@ class KnowledgeTrialMaker(StaticTrialMaker):
             }
             for participant in participants
         }
-        logger.info(f"Processing participants: {time.time() - start:.3f}s")
+        logger.info(
+            f"Processing participants: {time.time() - start:.3f}s"
+        )
 
-        # Fetch all nodes related to this trial maker
         start = time.time()
         networks = self.network_class.query.filter_by(
             trial_maker_id=self.id,
         ).all()
         nodes = [network.head for network in networks]
+        data["items"] = {node.id: {} for node in nodes}
         logger.info(f"Nodes query: {time.time() - start:.3f}s")
 
-        # Fetch all trials that belong to this trial maker
         start = time.time()
         trials = Trial.query.filter(
             Trial.failed == False,
@@ -702,30 +817,17 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         logger.info(f"Trials query: {time.time() - start:.3f}s")
 
         start = time.time()
-        trials_by_node = {}
-        for trial in trials:
-            if trial.node_id not in trials_by_node:
-                trials_by_node[trial.node_id] = []
-            trials_by_node[trial.node_id].append(trial)
-
-        # Process trials for each node
-        for node in nodes:
-            data["nodes"][node.id] = {}
-
-            if node.id in trials_by_node:
-                data["nodes"][node.id] = {
-                    trial.id: {
-                        "y": trial.score,
-                        "z": (
-                            data["participants"][trial.participant_id]["z"]
-                            if self.use_participant_data
-                            else None
-                        ),
-                        "participant_id": trial.participant_id,
-                    }
-                    for trial in trials_by_node[node.id]
-                }
-        logger.info(f"Processing nodes: {time.time() - start:.3f}s")
+        data["y"] = {
+            trial.id: {
+                "value": trial.score,
+                "participant_id": trial.participant_id,
+                "item_id": trial.node_id,
+            }
+            for trial in trials
+        }
+        logger.info(
+            f"Processing observations: {time.time() - start:.3f}s"
+        )
 
         return data
 
@@ -793,102 +895,6 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         )
 
 
-class ActiveInference(OptimalDesign):
-    def get_optimal_node(self, nodes_ids, participant, data):
-        z_i = participant.var.z
-
-        S = 2000
-
-        rewards = dict()
-        eig = dict()
-        utility = dict()
-        p_outcome = dict()
-
-        alphas = dict()
-        betas = dict()
-
-        z_participants = np.array(
-            [
-                data["participants"][participant_id]["z"]
-                for participant_id in data["participants"]
-                if data["participants"][participant_id]["z"] != None
-            ]
-        )
-
-        alpha_z = 1 + np.sum(z_participants == 1)
-        beta_z = 1 + np.sum(z_participants == 0)
-        p_z = alpha_z / (alpha_z + beta_z)
-
-        for node_id in nodes_ids:
-            alpha = np.ones(2)
-            beta = np.ones(2)
-
-            for trial_id, trial in data["nodes"][node_id].items():
-                if trial["y"] == True:
-                    alpha[trial["z"]] += 1
-                elif trial["y"] == False:
-                    beta[trial["z"]] += 1
-
-            alphas[node_id] = alpha
-            betas[node_id] = beta
-
-            alpha = alpha[:, np.newaxis]
-            beta = beta[:, np.newaxis]
-
-            phi = np.random.beta(
-                alpha,
-                beta,
-                (2, S),
-            )
-
-            y = np.random.binomial(
-                np.ones((2, S), dtype=int),
-                phi,
-                size=(
-                    2,
-                    S,
-                ),
-            )
-
-            p_y_given_phi = phi * y + (1 - phi) * (1 - y)
-            p_y = alpha / (alpha + beta) * y + beta / (alpha + beta) * (1 - y)
-
-            EIG = np.mean(np.log(p_y_given_phi[z_i] / p_y[z_i]))
-
-            gamma = 0.1
-            p_z = 0.5
-            U = gamma * np.mean(
-                p_z * y[1]
-                + (1 - p_z) * (1 - y[0])
-                - p_z * (1 - y[1])
-                - (1 - p_z) * y[0]
-            )
-
-            rewards[node_id] = EIG + U
-            eig[node_id] = EIG
-            utility[node_id] = U
-            p_outcome[node_id] = float((alpha / (alpha + beta))[z_i].mean())
-
-        best_node = sorted(
-            list(rewards.keys()),
-            key=lambda node_id: rewards[node_id],
-            reverse=True,
-        )[0]
-
-        if len(nodes_ids) == 15:
-            with open(f"output/utility_{SETUP}.csv", "a", newline="") as file:
-                writer = csv.writer(file)
-                writer.writerow(
-                    [
-                        rewards[best_node],
-                        eig[best_node],
-                        utility[best_node],
-                    ]
-                )
-
-        return best_node, {0: 1 - p_outcome[best_node], 1: p_outcome[best_node]}
-
-
 def get_prolific_settings(experiment_duration):
     with open("qualification_prolific_en.json", "r") as f:
         qualification = json.dumps(json.load(f))
@@ -918,7 +924,7 @@ elif RECRUITER == "cap-recruiter":
 
 class Exp(psynet.experiment.Experiment):
     label = "Active inference for adaptive experiments"
-    test_n_bots = 200
+    test_n_bots = TEST_N_BOTS
     test_mode = "serial"
 
     config = {
@@ -949,7 +955,7 @@ class Exp(psynet.experiment.Experiment):
             lambda participant: participant.var.set(
                 "z",
                 (
-                    int(oracle.college(participant.id))
+                    int(get_oracle().college(participant.id))
                     if DEBUG_MODE
                     else (
                         participant.answer
@@ -963,27 +969,47 @@ class Exp(psynet.experiment.Experiment):
                 ),
             )
         ),
-        KnowledgeTrialMaker(
-            id_="optimal_treatment",
-            optimizer_class=(
-                ActiveInference if SETUP == "adaptive" else None
-            ),  # Active inference w/ a prior preference over outcomes
-            domains=(
-                [1] if DEBUG_MODE else [0, 1]
-            ),  # questions about the solar system and american history
-            use_participant_data=True,  # optimization requires participant metadata
-            expected_trials_per_participant=5 if SETUP == "adaptive" else 30,
-            max_trials_per_participant=5 if SETUP == "adaptive" else 30,
+        *(
+            [
+                KnowledgeTrialMaker(
+                    id_="optimal_treatment",
+                    optimizer_class=(
+                        AdaptiveTreatment
+                        if SETUP == "adaptive"
+                        else None
+                    ),
+                    domains=(
+                        [1] if DEBUG_MODE else [0, 1]
+                    ),
+                    use_participant_data=True,
+                    expected_trials_per_participant=(
+                        5 if SETUP == "adaptive" else 30
+                    ),
+                    max_trials_per_participant=(
+                        5 if SETUP == "adaptive" else 30
+                    ),
+                )
+            ]
+            if JOURNAL_EXPERIMENT in ("both", "treatment")
+            else []
         ),
-        # KnowledgeTrialMaker(
-        #     id_="optimal_test",
-        #     optimizer_class=(
-        #         AdaptiveTesting if SETUP == "adaptive" else None
-        #     ),  # Bayesian adaptive design w/ an item-response model
-        #     domains=[0],  # questions about the solar system
-        #     use_participant_data=False,  # optimization does not require participant metadata
-        #     expected_trials_per_participant=15,
-        #     max_trials_per_participant=15,
-        # ),
+        *(
+            [
+                KnowledgeTrialMaker(
+                    id_="optimal_test",
+                    optimizer_class=(
+                        AdaptiveTesting
+                        if SETUP == "adaptive"
+                        else None
+                    ),
+                    domains=[0],
+                    use_participant_data=False,
+                    expected_trials_per_participant=15,
+                    max_trials_per_participant=15,
+                )
+            ]
+            if JOURNAL_EXPERIMENT in ("both", "testing")
+            else []
+        ),
         SuccessfulEndPage(),
     )
