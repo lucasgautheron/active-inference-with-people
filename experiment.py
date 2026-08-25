@@ -41,7 +41,6 @@ from scipy.stats import norm
 
 import pandas as pd
 
-DEBUG_MODE = True
 DEBUG_PLOTS = False
 SETUP = "adaptive"
 RECRUITER = "hotair"
@@ -50,9 +49,7 @@ DURATION_ESTIMATE = 60 + 30 * 20  # in seconds
 assert SETUP in ["adaptive", "oracle"]
 assert RECRUITER in ["hotair", "prolific", "cap-recruiter"]
 
-logging.basicConfig(
-    level=logging.DEBUG if DEBUG_MODE else logging.INFO,
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
 
@@ -949,18 +946,14 @@ class Exp(psynet.experiment.Experiment):
             lambda participant: participant.var.set(
                 "z",
                 (
-                    int(oracle.college(participant.id))
-                    if DEBUG_MODE
-                    else (
-                        participant.answer
-                        in [
-                            "college",
-                            "graduate_school",
-                            "postgraduate_degree_or_higher",
-                        ]
-                    )
-                    * 1
-                ),
+                    participant.answer
+                    in [
+                        "college",
+                        "graduate_school",
+                        "postgraduate_degree_or_higher",
+                    ]
+                )
+                * 1,
             )
         ),
         KnowledgeTrialMaker(
@@ -968,7 +961,7 @@ class Exp(psynet.experiment.Experiment):
             optimizer_class=(
                 AdaptiveTreatment if SETUP == "adaptive" else None
             ),
-            domains=([1] if DEBUG_MODE else [0, 1]),
+            domains=[0, 1],
             use_participant_data=True,
             expected_trials_per_participant=(
                 5 if SETUP == "adaptive" else 30
