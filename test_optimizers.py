@@ -6,15 +6,12 @@ import pytest
 
 os.environ.setdefault("DALLINGER_NO_EXPERIMENT_PRELOAD", "1")
 
-import experiment as experiment_module
 from experiment import (
     AdaptiveTesting,
     AdaptiveTreatment,
     OptimalDesign,
     beta_bernoulli_eig,
 )
-
-experiment_module.DEBUG_MODE = False
 
 
 class StubVar:
