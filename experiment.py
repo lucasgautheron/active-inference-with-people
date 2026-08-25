@@ -1,7 +1,6 @@
 # pylint: disable=unused-import,abstract-method
 
 import logging
-import os
 import random
 import time
 import json
@@ -43,18 +42,10 @@ from scipy.stats import norm
 import pandas as pd
 
 DEBUG_MODE = True
+DEBUG_PLOTS = False
 SETUP = "adaptive"
 RECRUITER = "hotair"
 DURATION_ESTIMATE = 60 + 30 * 20  # in seconds
-JOURNAL_EXPERIMENT = os.environ.get("JOURNAL_EXPERIMENT", "both")
-AIF_NUM_STEPS = int(os.environ.get("AIF_NUM_STEPS", "400"))
-AIF_NUM_SAMPLES = int(os.environ.get("AIF_NUM_SAMPLES", "400"))
-AIF_FINAL_SAMPLES = int(os.environ.get("AIF_FINAL_SAMPLES", "10000"))
-AIF_EPSILON = float(os.environ.get("AIF_EPSILON", "0.04"))
-TEST_N_BOTS = int(os.environ.get("TEST_N_BOTS", "200"))
-DEBUG_PLOTS = os.environ.get("DEBUG_PLOTS", "") == "1"
-
-assert JOURNAL_EXPERIMENT in ["both", "treatment", "testing"]
 
 assert SETUP in ["adaptive", "oracle"]
 assert RECRUITER in ["hotair", "prolific", "cap-recruiter"]
@@ -219,10 +210,10 @@ class OptimalDesign:
 class AdaptiveTesting(OptimalDesign):
     def __init__(
         self,
-        num_steps=AIF_NUM_STEPS,
-        num_samples=AIF_NUM_SAMPLES,
-        final_num_samples=AIF_FINAL_SAMPLES,
-        epsilon=AIF_EPSILON,
+        num_steps=400,
+        num_samples=400,
+        final_num_samples=10000,
+        epsilon=0.04,
         svi_lr=0.02,
         start_lr=0.1,
         end_lr=0.001,
@@ -924,7 +915,7 @@ elif RECRUITER == "cap-recruiter":
 
 class Exp(psynet.experiment.Experiment):
     label = "Active inference for adaptive experiments"
-    test_n_bots = TEST_N_BOTS
+    test_n_bots = 200
     test_mode = "serial"
 
     config = {
@@ -969,47 +960,29 @@ class Exp(psynet.experiment.Experiment):
                 ),
             )
         ),
-        *(
-            [
-                KnowledgeTrialMaker(
-                    id_="optimal_treatment",
-                    optimizer_class=(
-                        AdaptiveTreatment
-                        if SETUP == "adaptive"
-                        else None
-                    ),
-                    domains=(
-                        [1] if DEBUG_MODE else [0, 1]
-                    ),
-                    use_participant_data=True,
-                    expected_trials_per_participant=(
-                        5 if SETUP == "adaptive" else 30
-                    ),
-                    max_trials_per_participant=(
-                        5 if SETUP == "adaptive" else 30
-                    ),
-                )
-            ]
-            if JOURNAL_EXPERIMENT in ("both", "treatment")
-            else []
+        KnowledgeTrialMaker(
+            id_="optimal_treatment",
+            optimizer_class=(
+                AdaptiveTreatment if SETUP == "adaptive" else None
+            ),
+            domains=([1] if DEBUG_MODE else [0, 1]),
+            use_participant_data=True,
+            expected_trials_per_participant=(
+                5 if SETUP == "adaptive" else 30
+            ),
+            max_trials_per_participant=(
+                5 if SETUP == "adaptive" else 30
+            ),
         ),
-        *(
-            [
-                KnowledgeTrialMaker(
-                    id_="optimal_test",
-                    optimizer_class=(
-                        AdaptiveTesting
-                        if SETUP == "adaptive"
-                        else None
-                    ),
-                    domains=[0],
-                    use_participant_data=False,
-                    expected_trials_per_participant=15,
-                    max_trials_per_participant=15,
-                )
-            ]
-            if JOURNAL_EXPERIMENT in ("both", "testing")
-            else []
+        KnowledgeTrialMaker(
+            id_="optimal_test",
+            optimizer_class=(
+                AdaptiveTesting if SETUP == "adaptive" else None
+            ),
+            domains=[0],
+            use_participant_data=False,
+            expected_trials_per_participant=15,
+            max_trials_per_participant=15,
         ),
         SuccessfulEndPage(),
     )
