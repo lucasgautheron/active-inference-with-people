@@ -63,11 +63,19 @@ class Oracle:
     """
 
     def __init__(self, domains):
+        self.domains = domains
+        self.answers = None
+        self.education = None
+
+    def _load(self):
+        if self.answers is not None:
+            return
+
         answers = pd.read_csv(
             "output/KnowledgeTrial_oracle_treatment.csv"
         )
         answers["domain"] = (answers["node_id"] - 1) // 15
-        answers = answers[answers["domain"].isin(domains)]
+        answers = answers[answers["domain"].isin(self.domains)]
 
         logger.info(answers["answer"])
 
@@ -120,20 +128,15 @@ class Oracle:
         logger.info(answers.shape)
 
     def answer(self, participant_id: int, item_id: int):
+        self._load()
         return self.answers[(participant_id, item_id)]
 
     def college(self, participant_id: int):
+        self._load()
         return self.education[participant_id]
 
 
-_oracle = None
-
-
-def get_oracle():
-    global _oracle
-    if _oracle is None:
-        _oracle = Oracle(domains=[0, 1])
-    return _oracle
+oracle = Oracle(domains=[0, 1])
 
 
 def beta_bernoulli_eig(alpha, beta):
@@ -677,7 +680,7 @@ class KnowledgeTrial(StaticTrial):
             ),
             TextControl(
                 block_copy_paste=True,
-                bot_response=lambda: get_oracle().answer(
+                bot_response=lambda: oracle.answer(
                     participant.id,
                     question,
                 ),
@@ -946,7 +949,7 @@ class Exp(psynet.experiment.Experiment):
             lambda participant: participant.var.set(
                 "z",
                 (
-                    int(get_oracle().college(participant.id))
+                    int(oracle.college(participant.id))
                     if DEBUG_MODE
                     else (
                         participant.answer
