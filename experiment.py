@@ -69,7 +69,7 @@ class Oracle:
             return
 
         answers = pd.read_csv(
-            "output/KnowledgeTrial_oracle_treatment.csv"
+            "oracle_data/KnowledgeTrial_oracle_treatment.csv"
         )
         answers["domain"] = (answers["node_id"] - 1) // 15
         answers = answers[answers["domain"].isin(self.domains)]
@@ -77,7 +77,7 @@ class Oracle:
         logger.info(answers["answer"])
 
         participants = pd.read_csv(
-            "output/Participant_oracle_treatment.csv"
+            "oracle_data/Participant_oracle_treatment.csv"
         )
         participants = participants[
             participants["progress"] == 1
