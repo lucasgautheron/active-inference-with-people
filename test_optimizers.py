@@ -9,14 +9,22 @@ os.environ.setdefault("DALLINGER_NO_EXPERIMENT_PRELOAD", "1")
 from experiment import (
     AdaptiveTesting,
     AdaptiveTreatment,
+    KnowledgeTrialMaker,
     OptimalDesign,
     beta_bernoulli_eig,
 )
+from psynet.trial.static import StaticTrialMaker
 
 
 class StubVar:
     def __init__(self, z=1):
         self.z = z
+
+    def set(self, key, value):
+        setattr(self, key, value)
+
+    def get(self, key, default=None):
+        return getattr(self, key, default)
 
 
 class StubParticipant:
@@ -252,6 +260,78 @@ def test_plug_and_play_loop():
     )
     assert node == 3
     assert p == {0: 0.5, 1: 0.5}
+
+
+class StubOptimizer:
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def get_optimal_node(self, candidates, participant, data):
+        self.calls.append((candidates, participant, data))
+        return self.result
+
+
+def make_trial_maker(optimizer):
+    trial_maker = object.__new__(KnowledgeTrialMaker)
+    trial_maker.optimizer = optimizer
+    trial_maker.prior_data = lambda experiment: {"experiment": experiment}
+    return trial_maker
+
+
+def test_find_nodes_runs_optimizer_once_and_keeps_node_identity(monkeypatch):
+    first = type("Node", (), {"id": 10})()
+    second = type("Node", (), {"id": 11})()
+    nodes = [first, second]
+    monkeypatch.setattr(
+        StaticTrialMaker,
+        "find_nodes",
+        lambda self, participant, experiment: nodes,
+    )
+    optimizer = StubOptimizer((11, {0: 0.25, 1: 0.75}))
+    trial_maker = make_trial_maker(optimizer)
+    participant = StubParticipant(1)
+    experiment = object()
+
+    result = trial_maker.find_nodes(participant, experiment)
+
+    assert result == [second]
+    assert result[0] is second
+    assert trial_maker.select_node(result, participant, experiment) is second
+    assert optimizer.calls == [
+        ([10, 11], participant, {"experiment": experiment})
+    ]
+    assert participant.var.p_y == {0: 0.25, 1: 0.75}
+
+
+def test_find_nodes_translates_optimizer_early_stop_to_exit(monkeypatch):
+    node = type("Node", (), {"id": 10})()
+    monkeypatch.setattr(
+        StaticTrialMaker,
+        "find_nodes",
+        lambda self, participant, experiment: [node],
+    )
+    optimizer = StubOptimizer((None, None))
+    trial_maker = make_trial_maker(optimizer)
+
+    result = trial_maker.find_nodes(StubParticipant(1), object())
+
+    assert result == "exit"
+    assert len(optimizer.calls) == 1
+
+
+def test_find_nodes_without_optimizer_preserves_eligible_nodes(monkeypatch):
+    nodes = [object(), object()]
+    monkeypatch.setattr(
+        StaticTrialMaker,
+        "find_nodes",
+        lambda self, participant, experiment: nodes,
+    )
+    trial_maker = make_trial_maker(optimizer=None)
+
+    result = trial_maker.find_nodes(StubParticipant(1), object())
+
+    assert result is nodes
 
 
 def torch_all_finite(value):
