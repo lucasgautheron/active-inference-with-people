@@ -823,7 +823,11 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         return data
 
     @log_time_taken
-    def prioritize_nodes(self, nodes, participant, experiment):
+    def find_nodes(self, participant, experiment):
+        nodes = super().find_nodes(participant, experiment)
+        if not isinstance(nodes, list) or self.optimizer is None:
+            return nodes
+
         candidates = {node.id: node for node in nodes}
 
         data = self.prior_data(experiment)
@@ -834,31 +838,9 @@ class KnowledgeTrialMaker(StaticTrialMaker):
         participant.var.set("p_y", p)
 
         if next_node is None:
-            return []
+            return "exit"
 
         return [candidates[next_node]]
-
-    def prioritize_networks(self, networks, participant, experiment):
-        if self.optimizer is None:
-            return networks
-
-        nodes = [network.head for network in networks]
-        nodes = self.prioritize_nodes(nodes, participant, experiment)
-
-        # filter
-        networks = [
-            network
-            for network in networks
-            if network.head.id in [node.id for node in nodes]
-        ]
-
-        # re-order
-        order = [node.id for node in nodes]
-        networks = sorted(
-            networks, key=lambda network: order.index(network.head.id)
-        )
-
-        return networks
 
     def finalize_trial(
         self,

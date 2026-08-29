@@ -1,5 +1,4 @@
-#psynet@git+https://gitlab.com/PsyNetDev/PsyNet@master#egg=psynet
-psynet==12.1.0
+psynet[experiment] @ git+https://gitlab.com/PsyNetDev/PsyNet@master
 pyro-ppl==1.9.1
 matplotlib
 pandas
