@@ -528,7 +528,7 @@ def simulate(strategies, output):
     # Run oracle simulation
     print("Running oracle simulation...")
     oracle = Simulator(
-        strategy="oracle", nodes=np.arange(15, 31), gamma=1
+        strategy="oracle", nodes=np.arange(16, 31), gamma=1
     ).simulate()
 
 
@@ -538,7 +538,7 @@ def simulate(strategies, output):
     results_15 = evaluate_strategies_accuracy(
         strategies,
         oracle,
-        np.arange(15, 31),
+        np.arange(16, 31),
         n_simulations=N_SIMULATIONS,  # Increased from 1 for demonstration
         n_processes=N_CPU,  # Specify number of processes
     )
@@ -577,11 +577,11 @@ def plot_policy_regret(df, output):
     oracle_best = dict()
 
     oracle_15 = Simulator(
-        strategy="oracle", nodes=np.arange(1, 31), gamma=1
+        strategy="oracle", nodes=np.arange(16, 31), gamma=1
     ).simulate()
 
     oracle_30 = Simulator(
-        strategy="oracle", nodes=np.arange(15, 31), gamma=1
+        strategy="oracle", nodes=np.arange(1, 31), gamma=1
     ).simulate()
 
     oracle_utilities_15, oracle_entropies_15 = (
@@ -645,7 +645,8 @@ def plot_policy_regret(df, output):
         )
 
     plt.legend()
-    plt.show()
+    fig.savefig(output, bbox_inches="tight")
+    plt.close(fig)
     return df
 
 
@@ -857,24 +858,13 @@ def plot(df):
 
 if __name__ == "__main__":
     strategies = [
-        "exploration_sampling"
+        "static",
+        ("active_inference", 0.1),
+        ("active_inference", 0.2),
+        ("active_inference", 0.3),
+        "thompson_sampling",
+        "exploration_sampling",
     ]
-    output = "output/rl_exploration_sampling.parquet"
+    output = "output/rl_large_randomized.parquet"
     simulate(strategies, output)
-
-    if exists("output/rl_large_randomized.parquet"):
-        results = pd.read_parquet(
-            "output/rl_large_randomized.parquet"
-        )
-        plot(results)
-    else:
-        strategies = [
-            "static",
-            ("active_inference", 0.1),
-            ("active_inference", 0.2),
-            ("active_inference", 0.3),
-            "thompson_sampling",
-            "exploration_sampling",
-        ]
-        output="output/rl_large_randomized.parquet"
-        simulate(strategies, output)
+    plot(pd.read_parquet(output))
